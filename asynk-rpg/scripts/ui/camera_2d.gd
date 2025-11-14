@@ -30,7 +30,6 @@ func moveCamera(event: InputEvent):
 			var touch_indices = Touches.keys()
 			var p1 = Touches[touch_indices[0]]
 			var p2 = Touches[touch_indices[1]]
-			OldTouchenter = (p1 + p2)/2
 			
 			var current_distance = p1.distance_to(p2)
 			
@@ -42,12 +41,8 @@ func moveCamera(event: InputEvent):
 				new_zoom_x = clamp(new_zoom_x, MIN_ZOOM, MAX_ZOOM)
 				
 				zoom = Vector2(new_zoom_x, new_zoom_x)
-			position += OldTouchenter - (p1 + p2)/2
 			last_distance = current_distance
-			
-			
-			
-		
+	
 	if event is InputEventMouseButton:
 		OldMousePositionZoom =get_global_mouse_position()
 		
@@ -62,7 +57,7 @@ func moveCamera(event: InputEvent):
 	if Input.is_action_just_pressed("MOUSE_BUTTON_LEFT"):
 		PresstBeforUI = not Glob.MouseOnUI
 		OldMousePosition = get_global_mouse_position()
-	
+#	
 	if Input.is_action_pressed("MOUSE_BUTTON_LEFT"):
 		if event is InputEventMouseMotion and PresstBeforUI:
 			position += OldMousePosition - get_global_mouse_position()
