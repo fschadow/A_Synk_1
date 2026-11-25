@@ -11,11 +11,14 @@ func _input(event: InputEvent) -> void:
 	if Input.is_action_just_pressed("MOUSE_BUTTON_LEFT"):
 		StartMousPos = event.position
 	if Input.is_action_just_released("MOUSE_BUTTON_LEFT") and (StartMousPos.distance_to(event.position)< 10):
-			_move()
+		print(StartMousPos, " ", event.position)
+		_move()
 
+func SetInput(evevent: InputEvent):
+	_move();
 
 func _move():
-	if isMoving: return
+	if isMoving or Glob.CurStatus == Glob.Status.Nothing or Glob.MouseOnUI: return
 	
 	var mousePosition = get_global_mouse_position()
 	var isTargetPositionValid = get_tile_global_pos(mousePosition)
@@ -76,8 +79,8 @@ func _has_tile(tilePos):
 func get_tile_global_pos(mousePosition):
 	var mouseTilePos := tileMap.local_to_map(mousePosition)
 	var mouseTileDelta = tileMap.get_cell_atlas_coords(mouseTilePos)
-	if mouseTileDelta == Vector2i(0,1):
-		mouseTileDelta = Vector2i(-1,-1)
+	#if mouseTileDelta == Vector2i(0,1):
+		#mouseTileDelta = Vector2i(-1,-1)
 	#print(mouseTileDelta)
 	if mouseTileDelta == Vector2i(-1,-1): return
 	var tileGlobalPos = tileMap.map_to_local(mouseTilePos)
