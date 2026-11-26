@@ -2,7 +2,9 @@ extends Node
 #Resource
 #class_name Globals
 
-enum Status {Nothing,Lumber,Mine,Fish}
+## Faehigkeit in der Aktionsleiste. Nothing = Laufen.
+## (Neue Werte nur hinten anhaengen, die Zahlen stehen evtl. in Szenen.)
+enum Status {Nothing,Lumber,Mine,Fish,Collect}
 var CurStatus := Status.Nothing
 var MouseOnUI : bool
 
@@ -12,6 +14,15 @@ const GAME_SCENE := "res://scenes/node_2d.tscn"
 ## Vom Startmenue gesetzt: true = "Neues Spiel" (alten Spielstand verwerfen),
 ## false = "Weiterspielen" (gespeicherten Spielstand laden).
 var start_new_game := false
+
+## Status -> Aktion in den Spielregeln (ResourceConfig.ACT_*)
+func action_for(status: Status) -> String:
+	match status:
+		Status.Collect: return ResourceConfig.ACT_COLLECT
+		Status.Lumber: return ResourceConfig.ACT_FELL
+		Status.Mine: return ResourceConfig.ACT_MINE
+		Status.Fish: return ResourceConfig.ACT_FISH
+	return ResourceConfig.ACT_WALK
 
 func _init() -> void:
 	CurStatus = Status.Nothing

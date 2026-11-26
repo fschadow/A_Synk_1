@@ -3,13 +3,15 @@ extends Node2D
 ## dieses Spielers meldet, und entscheidet selbst nichts.
 
 @export var tileMap: TileMapLayer
+## Versatz der Figur zur Feldmitte. Die Figur steht mit den Fuessen auf ihrem
+## Ursprung, damit die Y-Sortierung mit Baeumen/Steinen stimmt.
 @export var offSet := Vector2(0, -6)
 ## Welcher Spieler (Index im GameState) diese Figur ist.
 @export var player_index := 0
 @export var step_time := 0.3
 ## Farbe des Rings unter der Figur, damit man die Spieler unterscheiden kann.
 @export var marker_color := Color(0.25, 0.55, 1.0, 0.85)
-@export var marker_offset := Vector2(6, 16)
+@export var marker_offset := Vector2(6, 0)
 
 var isMoving := false
 var _queue: Array = []

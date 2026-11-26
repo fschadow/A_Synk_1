@@ -17,6 +17,9 @@ const GROUP := "game_session"
 
 ## Die Bodenebene, aus der die begehbaren Felder gelesen werden.
 @export var terrain: TileMapLayer
+## Objekt-Ebenen (Baeume, Steine) links und rechts im Feld.
+@export var objects_left: TileMapLayer
+@export var objects_right: TileMapLayer
 @export var player_names: PackedStringArray = ["Spieler 1", "Spieler 2"]
 @export var start_cells: Array[Vector2i] = [Vector2i(0, 1), Vector2i(2, 2)]
 ## Spielstand nach jedem Zug in user://savegame.json sichern und beim Start laden.
@@ -26,6 +29,7 @@ const SAVE_PATH := "user://savegame.json"
 
 var state: GameState
 var map: HexMap
+var objects: WorldObjects
 
 
 func _enter_tree() -> void:
@@ -34,6 +38,7 @@ func _enter_tree() -> void:
 
 func _ready() -> void:
 	map = HexMap.from_cells(terrain.get_used_cells() if terrain else [])
+	objects = WorldObjects.from_layers(terrain, objects_left, objects_right)
 	# Erst starten, wenn alle Figuren/HUDs ihr _ready hinter sich haben.
 	_start.call_deferred()
 
@@ -69,13 +74,28 @@ func request_move_to(cell: Vector2i) -> bool:
 	return submit(move)
 
 
+## Mit gewaehlter Faehigkeit auf ein Feld getippt: hinlaufen (falls noetig)
+## und dort abbauen. ACT_WALK ist normales Laufen.
+func request_action(cell: Vector2i, action: String) -> bool:
+	if action == ResourceConfig.ACT_WALK:
+		return request_move_to(cell)
+	var plan := GameRules.make_action_at(state, map, objects, cell, action)
+	if plan.has("error"):
+		move_rejected.emit(plan["error"])
+		return false
+	for m in plan["moves"]:
+		if not submit(m):
+			return false
+	return true
+
+
 func request_end_turn() -> bool:
 	return submit(GameRules.make_end_turn(state))
 
 
 ## Einziger Weg, den Spielstand zu aendern.
 func submit(move: Dictionary) -> bool:
-	var err := GameRules.validate(state, map, move)
+	var err := GameRules.validate(state, map, move, objects)
 	if err != "":
 		move_rejected.emit(err)
 		return false

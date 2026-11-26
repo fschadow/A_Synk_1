@@ -12,6 +12,8 @@ func _init() -> void:
 	test_move_and_turn_order()
 	test_invalid_moves()
 	test_serialization_and_replay()
+	test_harvest()
+	test_harvest_limits_and_regrow()
 	print("%d Checks, %d Fehler" % [_checks, _failures])
 	quit(1 if _failures > 0 else 0)
 
@@ -110,3 +112,100 @@ func test_serialization_and_replay() -> void:
 	check(GameRules.replay(replayed, m, moves) == "", "Zuege lassen sich nachspielen")
 	check(replayed.to_dict() == s.to_dict(), "Nachgespielter Stand ist identisch")
 	check(GameRules.replay(GameState.from_json(start_json), m, [moves[2]]) != "", "Zug in falscher Reihenfolge wird abgelehnt")
+
+
+## Objekte auf der kleinen Karte: Apfelbaum + Stein auf (1,0), Pfuetze auf (0,1).
+func small_objects() -> WorldObjects:
+	return WorldObjects.from_dict({
+		"1,0,L": ResourceConfig.KIND_TREE_APPLE,
+		"1,0,R": ResourceConfig.KIND_STONE,
+		"0,1,T": ResourceConfig.KIND_PUDDLE,
+	})
+
+
+func run_action(s: GameState, m: HexMap, o: WorldObjects, cell: Vector2i, action: String) -> String:
+	var plan := GameRules.make_action_at(s, m, o, cell, action)
+	if plan.has("error"):
+		return plan["error"]
+	for mv in plan["moves"]:
+		var err := GameRules.validate(s, m, mv, o)
+		if err != "":
+			return err
+		GameRules.apply(s, mv)
+	return ""
+
+
+func test_harvest() -> void:
+	var m := small_map()
+	var o := small_objects()
+	var s := new_state()
+	# Hinlaufen (1 Schritt) + Sammeln (1 Schritt) am Apfelbaum.
+	check(run_action(s, m, o, Vector2i(1, 0), ResourceConfig.ACT_COLLECT) == "", "Sammeln am Apfelbaum geht")
+	var inv: Dictionary = s.current()["inv"]
+	check(inv[ResourceConfig.AESTE] == 1 and inv[ResourceConfig.OBST] == 1, "Sammeln gibt Ast + Obst")
+	check(s.current()["steps_left"] == 2, "Laufen + Sammeln kostet 2 Schritte")
+	check(s.resource_amount("1,0,L", ResourceConfig.KIND_TREE_APPLE) == 2, "Vorrat sinkt auf 2")
+	# Stein abbauen auf demselben Feld (kein Laufen).
+	check(run_action(s, m, o, Vector2i(1, 0), ResourceConfig.ACT_MINE) == "", "Mine geht")
+	check(s.current()["inv"][ResourceConfig.STEIN] == 1, "Mine gibt Stein")
+	# Faellen: Holz, Baum weg.
+	check(run_action(s, m, o, Vector2i(1, 0), ResourceConfig.ACT_FELL) == "", "Faellen geht")
+	check(s.current()["inv"][ResourceConfig.HOLZ] == ResourceConfig.FELL_WOOD, "Faellen gibt Holz")
+	check(s.is_gone("1,0,L"), "Baum ist nach dem Faellen weg")
+	check(run_action(s, m, o, Vector2i(1, 0), ResourceConfig.ACT_COLLECT) != "", "Gefaellter Baum: kein Sammeln mehr")
+	check(s.current()["steps_left"] == 0, "Alle Schritte verbraucht")
+	# Falsche Faehigkeit / leeres Feld
+	var s2 := new_state()
+	check(run_action(s2, m, o, Vector2i(0, 1), ResourceConfig.ACT_MINE) != "", "Keine Steine auf der Pfuetze")
+	check(run_action(s2, m, o, Vector2i(3, 3), ResourceConfig.ACT_COLLECT) != "", "Nichts zu sammeln auf leerem Feld")
+	check(run_action(s2, m, o, Vector2i(0, 1), ResourceConfig.ACT_FISH) == "", "Fischen auf Pfuetze geht")
+	check(run_action(s2, m, o, Vector2i(0, 1), ResourceConfig.ACT_FISH) != "", "Pfuetze ist nach 1 Fisch leer")
+	# Gefaelschter Zug: falsche Objektart
+	var fake := {"type": GameRules.TYPE_HARVEST, "player": 0, "round": 1, "action": ResourceConfig.ACT_MINE,
+		"target": "0,0,L", "kind": ResourceConfig.KIND_STONE}
+	check(GameRules.validate(new_state(), m, fake, o) != "", "Abbau ohne Objekt wird abgelehnt")
+	# Spielstand mit Rohstoffen ueberlebt JSON
+	var copy := GameState.from_json(s.to_json())
+	check(copy.is_gone("1,0,L") and copy.players[0]["inv"][ResourceConfig.HOLZ] == ResourceConfig.FELL_WOOD,
+		"Rohstoffe und Vorrat werden gespeichert")
+	var old_save := GameState.from_dict({"players": [{"id": "p1", "name": "A", "pos": [0, 0], "steps_left": 4}]})
+	check(old_save.players[0]["inv"][ResourceConfig.HOLZ] == 0, "Alter Spielstand ohne Inventar laedt")
+
+
+func end_turns(s: GameState, n: int) -> void:
+	for i in n:
+		GameRules.apply(s, GameRules.make_end_turn(s))
+
+
+func test_harvest_limits_and_regrow() -> void:
+	var m := small_map()
+	var o := small_objects()
+	var s := new_state()
+	# Stein 3x abbauen -> weg, waechst nicht nach.
+	s.players[0]["pos"] = Vector2i(1, 0)
+	for i in 3:
+		s.players[0]["steps_left"] = 4
+		check(run_action(s, m, o, Vector2i(1, 0), ResourceConfig.ACT_MINE) == "", "Stein abbauen %d" % (i + 1))
+	check(s.is_gone("1,0,R"), "Leerer Steinhaufen verschwindet")
+	end_turns(s, 2 * ResourceConfig.REGROW_ROUNDS * 2)
+	check(s.is_gone("1,0,R"), "Stein waechst nicht nach")
+	# Baum leer sammeln, dann waechst er nach.
+	var t := new_state()
+	t.players[0]["pos"] = Vector2i(1, 0)
+	for i in 3:
+		t.players[0]["steps_left"] = 4
+		run_action(t, m, o, Vector2i(1, 0), ResourceConfig.ACT_COLLECT)
+	check(t.resource_amount("1,0,L", ResourceConfig.KIND_TREE_APPLE) == 0, "Baum leer gesammelt")
+	check(run_action(t, m, o, Vector2i(1, 0), ResourceConfig.ACT_COLLECT) != "", "Leerer Baum: nichts zu sammeln")
+	end_turns(t, 2 * ResourceConfig.REGROW_ROUNDS)  # 2 Spieler -> REGROW_ROUNDS Runden
+	check(t.resource_amount("1,0,L", ResourceConfig.KIND_TREE_APPLE) == 1, "Baum waechst nach %d Runden um 1 nach" % ResourceConfig.REGROW_ROUNDS)
+	end_turns(t, 2 * ResourceConfig.REGROW_ROUNDS * 10)
+	check(t.resource_amount("1,0,L", ResourceConfig.KIND_TREE_APPLE) == 3, "Nachwachsen hoert beim Startvorrat auf")
+	# Tragegrenze
+	var u := new_state()
+	u.players[0]["pos"] = Vector2i(1, 0)
+	u.players[0]["inv"][ResourceConfig.STEIN] = ResourceConfig.CARRY_LIMIT
+	check(run_action(u, m, o, Vector2i(1, 0), ResourceConfig.ACT_MINE).begins_with("Du kannst nicht mehr tragen"), "Tragegrenze greift")
+	u.players[0]["inv"][ResourceConfig.AESTE] = ResourceConfig.CARRY_LIMIT
+	check(run_action(u, m, o, Vector2i(1, 0), ResourceConfig.ACT_COLLECT) == "", "Sammeln geht, solange Obst noch Platz hat")
+	check(u.players[0]["inv"][ResourceConfig.AESTE] == ResourceConfig.CARRY_LIMIT, "Aeste bleiben bei der Grenze")

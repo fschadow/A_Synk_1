@@ -4,17 +4,22 @@ extends RefCounted
 ## to_dict()/from_dict() in JSON umwandeln, damit der Stand spaeter in einer
 ## (Google-Drive-)Datei zwischen den Spielern hin und her gehen kann.
 
-const FORMAT_VERSION := 1
+const FORMAT_VERSION := 2
 
 var map_id: String = ""
 ## Laufende Runde, beginnt bei 1. Eine Runde ist vorbei, wenn alle einmal dran waren.
 var round_number: int = 1
 ## Index in players, wer gerade am Zug ist.
 var current_player: int = 0
-## Jeder Spieler: {"id": String, "name": String, "pos": Vector2i, "steps_left": int}
+## Jeder Spieler: {"id": String, "name": String, "pos": Vector2i, "steps_left": int,
+##                 "inv": {item: int}}  (siehe ResourceConfig.ITEMS)
 var players: Array[Dictionary] = []
 ## Alle bisher ausgefuehrten Zuege, in Reihenfolge (siehe GameRules fuer das Format).
 var history: Array[Dictionary] = []
+## Nur Objekte, die schon angefasst wurden (alle anderen haben vollen Vorrat):
+## id (siehe WorldObjects) -> {"amount": int, "since": int, "gone": bool}
+## amount = Vorrat in Runde since; danach waechst er ggf. nach (resource_amount()).
+var resources: Dictionary = {}
 
 
 static func new_game(names: Array, start_cells: Array, steps_per_turn: int, p_map_id: String = "") -> GameState:
@@ -27,6 +32,7 @@ static func new_game(names: Array, start_cells: Array, steps_per_turn: int, p_ma
 			"name": str(names[i]),
 			"pos": start_cells[i],
 			"steps_left": steps_per_turn if i == 0 else 0,
+			"inv": ResourceConfig.empty_inventory(),
 		})
 	return s
 
@@ -43,6 +49,25 @@ func occupied_cells(except_player: int = -1) -> Array[Vector2i]:
 	return cells
 
 
+## Aktueller Vorrat eines Objekts (0, wenn gefaellt/leer). Nachwachsen wird
+## hier ausgerechnet, damit niemand jede Runde ueber alle Objekte laufen muss.
+func resource_amount(id: String, kind: String) -> int:
+	var full: int = ResourceConfig.STOCK.get(kind, 0)
+	if not resources.has(id):
+		return full
+	var r: Dictionary = resources[id]
+	if r["gone"]:
+		return 0
+	var amount: int = r["amount"]
+	if ResourceConfig.REGROWS.get(kind, false):
+		amount += (round_number - int(r["since"])) / ResourceConfig.REGROW_ROUNDS
+	return mini(amount, full)
+
+
+func is_gone(id: String) -> bool:
+	return resources.has(id) and resources[id]["gone"]
+
+
 func duplicate_state() -> GameState:
 	return GameState.from_dict(to_dict())
 
@@ -55,6 +80,7 @@ func to_dict() -> Dictionary:
 			"name": p["name"],
 			"pos": [p["pos"].x, p["pos"].y],
 			"steps_left": p["steps_left"],
+			"inv": p["inv"].duplicate(),
 		})
 	return {
 		"version": FORMAT_VERSION,
@@ -63,6 +89,7 @@ func to_dict() -> Dictionary:
 		"current_player": current_player,
 		"players": ps,
 		"history": history.duplicate(true),
+		"resources": resources.duplicate(true),
 	}
 
 
@@ -77,10 +104,26 @@ static func from_dict(d: Dictionary) -> GameState:
 			"name": str(p["name"]),
 			"pos": Vector2i(int(p["pos"][0]), int(p["pos"][1])),
 			"steps_left": int(p["steps_left"]),
+			"inv": _read_inventory(p.get("inv", {})),
 		})
+	var res: Dictionary = d.get("resources", {})
+	for id in res:
+		var r: Dictionary = res[id]
+		s.resources[str(id)] = {
+			"amount": int(r.get("amount", 0)),
+			"since": int(r.get("since", 1)),
+			"gone": bool(r.get("gone", false)),
+		}
 	for m in d.get("history", []):
 		s.history.append(GameRules.normalize_move(m))
 	return s
+
+
+static func _read_inventory(raw: Dictionary) -> Dictionary:
+	var inv := ResourceConfig.empty_inventory()
+	for item in inv:
+		inv[item] = int(raw.get(item, 0))
+	return inv
 
 
 func to_json() -> String:
