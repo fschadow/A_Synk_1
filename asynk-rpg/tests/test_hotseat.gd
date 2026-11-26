@@ -90,6 +90,16 @@ func _ready() -> void:
 	var bar = world.get_node("CanvasLayer/ResourceBar")
 	check(bar._values[ResourceConfig.HOLZ].text == str(ResourceConfig.FELL_WOOD), "Rohstoffleiste zeigt das Holz")
 
+	# --- "Zur Figur": Kamera verschoben und rausgezoomt, Button holt sie zurueck ---
+	var cam: Camera2D = world.get_node("Camera2D")
+	var start_zoom: Vector2 = world._start_zoom
+	cam.position += Vector2(5000, -3000)
+	cam.zoom = Vector2(0.1, 0.1)
+	hud.focus_requested.emit()
+	await get_tree().create_timer(0.6).timeout
+	check(cam.position.distance_to(a1.global_position) < 1.0, "Zur Figur: Kamera steht auf Figur 1")
+	check(cam.zoom.is_equal_approx(start_zoom), "Zur Figur: Zoom ist zurueckgesetzt")
+
 	# --- Aktionsleiste: Umschalten haengt nicht ---
 	for st in [Glob.Status.Mine, Glob.Status.Collect, Glob.Status.Mine, Glob.Status.Nothing, Glob.Status.Fish]:
 		ui._buttons[st].button_pressed = true

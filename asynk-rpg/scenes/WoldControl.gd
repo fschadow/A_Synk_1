@@ -10,10 +10,14 @@ extends Node2D
 var StartMousPos: Vector2
 var _fell_dialog: ConfirmationDialog
 var _pending_fell := Vector2i.ZERO
+var _start_zoom: Vector2
+var _cam_tween: Tween
 
 
 func _ready() -> void:
+	_start_zoom = Camera.zoom
 	Session.turn_started.connect(_on_turn_started)
+	Hud.focus_requested.connect(focus_on_player)
 	# Android-Zurueck-Taste fuehrt im Spiel ins Hauptmenue statt die App zu schliessen.
 	get_tree().set_quit_on_go_back(false)
 	_fell_dialog = ConfirmationDialog.new()
@@ -32,6 +36,9 @@ func _notification(what: int) -> void:
 
 func _input(event: InputEvent) -> void:
 	if Hud.is_blocking() or _fell_dialog.visible:
+		return
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode in [KEY_SPACE, KEY_HOME]:
+		focus_on_player()
 		return
 	if Input.is_action_just_pressed("MOUSE_BUTTON_LEFT") or (event is InputEventScreenTouch and event.pressed):
 		StartMousPos = event.position
@@ -70,3 +77,23 @@ func _on_turn_started(player_index: int, state: GameState) -> void:
 	# Kamera auf die Figur des Spielers setzen, der jetzt dran ist.
 	var cell: Vector2i = state.players[player_index]["pos"]
 	Camera.position = Session.terrain.to_global(Session.terrain.map_to_local(cell))
+
+
+## Kamera weich zur Figur des aktiven Spielers fahren und den Zoom auf den
+## Startwert zuruecksetzen (Button "Zur Figur" bzw. Leertaste/Pos1).
+func focus_on_player() -> void:
+	var target := _current_player_position()
+	if _cam_tween:
+		_cam_tween.kill()
+	_cam_tween = create_tween().set_parallel().set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	_cam_tween.tween_property(Camera, "position", target, 0.4)
+	_cam_tween.tween_property(Camera, "zoom", _start_zoom, 0.4)
+
+
+func _current_player_position() -> Vector2:
+	# Die sichtbare Figur nehmen (laeuft sie gerade, dorthin, wo sie gerade ist).
+	for agent in get_tree().get_nodes_in_group("hex_agents"):
+		if agent.player_index == Session.state.current_player:
+			return agent.get_parent().global_position
+	var cell: Vector2i = Session.state.current()["pos"]
+	return Session.terrain.to_global(Session.terrain.map_to_local(cell))

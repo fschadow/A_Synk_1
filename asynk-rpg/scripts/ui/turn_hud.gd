@@ -4,6 +4,9 @@ extends Control
 ## erscheint ein Uebergabe-Bildschirm, damit der naechste Spieler bewusst
 ## uebernimmt. Veraendert den Spielstand nur ueber die GameSession.
 
+## "Zur Figur" gedrueckt: die Welt soll die Kamera auf die aktive Figur setzen.
+signal focus_requested
+
 var _session: GameSession
 var _info: Label
 var _hint: Label
@@ -51,6 +54,11 @@ func _build() -> void:
 	_end_button.text = "Zug beenden"
 	_end_button.pressed.connect(func(): _session.request_end_turn())
 	box.add_child(_end_button)
+	var focus := Button.new()
+	focus.text = "Zur Figur"
+	focus.pressed.connect(func(): focus_requested.emit())
+	focus.mouse_entered.connect(func(): Glob.MouseOnUI = true)
+	box.add_child(focus)
 	var menu := Button.new()
 	menu.text = "Hauptmenü"
 	menu.flat = true
