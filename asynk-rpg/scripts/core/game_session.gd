@@ -39,6 +39,10 @@ func _ready() -> void:
 
 
 func _start() -> void:
+	if Glob.start_new_game:
+		Glob.start_new_game = false
+		new_game()
+		return
 	var loaded := load_game() if autosave else null
 	if loaded:
 		state = loaded
@@ -82,6 +86,11 @@ func submit(move: Dictionary) -> bool:
 	if state.current_player != before_player:
 		turn_started.emit(state.current_player, state)
 	return true
+
+
+## true, wenn ein Spielstand existiert (fuer "Weiterspielen" im Startmenue).
+static func has_savegame() -> bool:
+	return FileAccess.file_exists(SAVE_PATH)
 
 
 func load_game() -> GameState:

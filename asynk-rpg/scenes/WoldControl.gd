@@ -10,6 +10,13 @@ var StartMousPos: Vector2
 
 func _ready() -> void:
 	Session.turn_started.connect(_on_turn_started)
+	# Android-Zurueck-Taste fuehrt im Spiel ins Hauptmenue statt die App zu schliessen.
+	get_tree().set_quit_on_go_back(false)
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_GO_BACK_REQUEST:
+		Glob.go_to_menu()
 
 
 func _input(event: InputEvent) -> void:

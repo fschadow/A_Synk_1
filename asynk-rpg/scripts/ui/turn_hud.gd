@@ -51,12 +51,12 @@ func _build() -> void:
 	_end_button.text = "Zug beenden"
 	_end_button.pressed.connect(func(): _session.request_end_turn())
 	box.add_child(_end_button)
-	var restart := Button.new()
-	restart.text = "Neues Spiel"
-	restart.flat = true
-	restart.pressed.connect(func(): _session.new_game())
-	restart.mouse_entered.connect(func(): Glob.MouseOnUI = true)
-	box.add_child(restart)
+	var menu := Button.new()
+	menu.text = "Hauptmenü"
+	menu.flat = true
+	menu.pressed.connect(func(): Glob.go_to_menu())
+	menu.mouse_entered.connect(func(): Glob.MouseOnUI = true)
+	box.add_child(menu)
 	_hint = Label.new()
 	_hint.modulate = Color(1, 0.75, 0.4)
 	box.add_child(_hint)
