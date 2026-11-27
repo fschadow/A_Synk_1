@@ -5,12 +5,16 @@ extends RefCounted
 ## gefaellt) steht im GameState.
 ##
 ## Jedes Objekt hat eine ID "x,y,S" mit S = Slot:
-##   L = Objekt-Ebene links (O-L), R = Objekt-Ebene rechts (O-R), T = Boden (Pfuetze)
+##   L = Objekt-Ebene links (O-L), R = Objekt-Ebene rechts (O-R), T = Boden (Pfuetze),
+##   W = Gewaesser (Fischgrund; Art = Gelaendeart, gefischt wird vom Nachbarfeld),
+##   V = Tier-Dorf (siehe Villages)
 
 const SLOT_LEFT := "L"
 const SLOT_RIGHT := "R"
 const SLOT_TERRAIN := "T"
-const SLOTS: Array[String] = [SLOT_LEFT, SLOT_RIGHT, SLOT_TERRAIN]
+const SLOT_WATER := "W"
+const SLOT_VILLAGE := "V"
+const SLOTS: Array[String] = [SLOT_LEFT, SLOT_RIGHT, SLOT_TERRAIN, SLOT_WATER, SLOT_VILLAGE]
 
 ## id -> Objektart (ResourceConfig.KIND_*)
 var _kinds: Dictionary = {}
@@ -52,6 +56,14 @@ static func from_dict(kinds: Dictionary) -> WorldObjects:
 	var w := WorldObjects.new()
 	w._kinds = kinds.duplicate()
 	return w
+
+
+func set_kind(id: String, k: String) -> void:
+	_kinds[id] = k
+
+
+func ids() -> Array:
+	return _kinds.keys()
 
 
 func kind(id: String) -> String:

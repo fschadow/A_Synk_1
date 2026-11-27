@@ -27,6 +27,8 @@ var _ai_button: Button
 var _waiting_for := -1
 ## Zuletzt angezeigter Spieler am Uebergabe-Bildschirm (LAN-Hotseat).
 var _last_local := -1
+var _season_label: Label
+var _last_season := -2
 
 
 func _ready() -> void:
@@ -69,6 +71,10 @@ func _build() -> void:
 	_panel.add_child(box)
 	_info = Label.new()
 	box.add_child(_info)
+	_season_label = Label.new()
+	_season_label.visible = false
+	_season_label.modulate = Color(0.85, 0.95, 1.0)
+	box.add_child(_season_label)
 	_clock_label = Label.new()
 	_clock_label.visible = false
 	box.add_child(_clock_label)
@@ -88,6 +94,8 @@ func _build() -> void:
 	menu.mouse_entered.connect(func(): Glob.MouseOnUI = true)
 	box.add_child(menu)
 	_hint = Label.new()
+	_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_hint.custom_minimum_size.x = 260
 	_hint.modulate = Color(1, 0.75, 0.4)
 	box.add_child(_hint)
 	_panel.mouse_entered.connect(func(): Glob.MouseOnUI = true)
@@ -170,7 +178,37 @@ func _refresh(state: GameState) -> void:
 	else:
 		_info.text = "Runde %d · %s ist dran\nNoch %d Schritte" % [state.round_number, who, me["steps_left"]]
 	_end_button.disabled = not Net.controls(state.current_player) or Net.is_paused(state)
+	_refresh_season(state)
 	_refresh_pause(state)
+
+
+func _refresh_season(state: GameState) -> void:
+	var season := state.season()
+	_season_label.visible = season >= 0
+	if season < 0:
+		return
+	var length := int(state.settings.get("season_length", 0))
+	var left := length - ((state.round_number - 1) % length)
+	var name: String = Terrain.SEASON_NAMES[season]
+	if season == Terrain.WINTER:
+		name = Terrain.WINTER_NAMES[state.winter_level()].capitalize()
+	_season_label.text = "%s · Jahr %d · noch %d %s" % [name, state.year() + 1, left, "Runde" if left == 1 else "Runden"]
+	if _last_season != -2 and season != _last_season:
+		_show_hint(_season_message(season, state.winter_level()), 6.0)
+	_last_season = season
+
+
+static func _season_message(season: int, winter: int) -> String:
+	match season:
+		Terrain.SPRING:
+			return "Der Frühling beginnt – die Bäume blühen, das Eis taut."
+		Terrain.SUMMER:
+			return "Der Sommer beginnt – jetzt kann man schwimmen, die Bäume tragen Obst."
+		Terrain.AUTUMN:
+			return "Der Herbst beginnt – zu kalt zum Schwimmen, Laub fällt."
+	return ["Ein milder Winter beginnt – nur Teiche frieren zu.",
+		"Der Winter beginnt – Teiche, Seen und Flüsse frieren zu.",
+		"Ein harter Winter beginnt – sogar das seichte Meer friert zu."][winter]
 
 
 func _refresh_pause(state: GameState) -> void:
@@ -205,8 +243,8 @@ func _on_turn_started(player_index: int, state: GameState) -> void:
 		_overlay.visible = true
 
 
-func _show_hint(reason: String) -> void:
+func _show_hint(reason: String, seconds := 2.5) -> void:
 	_hint.text = reason
-	_hint_timer = get_tree().create_timer(2.5)
+	_hint_timer = get_tree().create_timer(seconds)
 	var t := _hint_timer
 	t.timeout.connect(func(): if _hint_timer == t: _hint.text = "")

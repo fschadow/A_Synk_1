@@ -4,9 +4,13 @@ extends RefCounted
 ## to_dict()/from_dict() in JSON umwandeln, damit der Stand spaeter in einer
 ## (Google-Drive-)Datei zwischen den Spielern hin und her gehen kann.
 
-const FORMAT_VERSION := 2
+const FORMAT_VERSION := 3
 
 var map_id: String = ""
+## Spiel-Einstellungen, die die Regeln beeinflussen (gleich auf allen Geraeten):
+## {"season_length": Runden (0 = ohne Jahreszeiten),
+##  "map": {"preset", "size", "seed"}}  (siehe MapGen)
+var settings: Dictionary = {}
 ## Laufende Runde, beginnt bei 1. Eine Runde ist vorbei, wenn alle einmal dran waren.
 var round_number: int = 1
 ## Index in players, wer gerade am Zug ist.
@@ -22,10 +26,12 @@ var history: Array[Dictionary] = []
 var resources: Dictionary = {}
 
 
-static func new_game(names: Array, start_cells: Array, steps_per_turn: int, p_map_id: String = "") -> GameState:
+static func new_game(names: Array, start_cells: Array, steps_per_turn: int, p_map_id: String = "",
+		p_settings: Dictionary = {}) -> GameState:
 	assert(names.size() == start_cells.size())
 	var s := GameState.new()
 	s.map_id = p_map_id
+	s.settings = p_settings.duplicate(true)
 	for i in names.size():
 		s.players.append({
 			"id": "p%d" % (i + 1),
@@ -52,16 +58,30 @@ func occupied_cells(except_player: int = -1) -> Array[Vector2i]:
 ## Aktueller Vorrat eines Objekts (0, wenn gefaellt/leer). Nachwachsen wird
 ## hier ausgerechnet, damit niemand jede Runde ueber alle Objekte laufen muss.
 func resource_amount(id: String, kind: String) -> int:
-	var full: int = ResourceConfig.STOCK.get(kind, 0)
+	var full: int = ResourceConfig.stock(kind)
 	if not resources.has(id):
 		return full
 	var r: Dictionary = resources[id]
 	if r["gone"]:
 		return 0
 	var amount: int = r["amount"]
-	if ResourceConfig.REGROWS.get(kind, false):
+	if ResourceConfig.regrows(kind):
 		amount += (round_number - int(r["since"])) / ResourceConfig.REGROW_ROUNDS
 	return mini(amount, full)
+
+
+## Aktuelle Jahreszeit (Terrain.SPRING..WINTER) oder -1 ohne Jahreszeiten.
+func season() -> int:
+	return Terrain.season_for(round_number, int(settings.get("season_length", 0)))
+
+
+func year() -> int:
+	return Terrain.year_for(round_number, int(settings.get("season_length", 0)))
+
+
+## Haerte des aktuellen (bzw. naechsten) Winters: 0 mild, 1 normal, 2 hart.
+func winter_level() -> int:
+	return Terrain.winter_level_for(int(settings.get("map", {}).get("seed", 0)), year())
 
 
 func is_gone(id: String) -> bool:
@@ -85,6 +105,7 @@ func to_dict() -> Dictionary:
 	return {
 		"version": FORMAT_VERSION,
 		"map_id": map_id,
+		"settings": settings.duplicate(true),
 		"round": round_number,
 		"current_player": current_player,
 		"players": ps,
@@ -96,6 +117,8 @@ func to_dict() -> Dictionary:
 static func from_dict(d: Dictionary) -> GameState:
 	var s := GameState.new()
 	s.map_id = str(d.get("map_id", ""))
+	var raw_settings = d.get("settings", {})
+	s.settings = raw_settings if raw_settings is Dictionary else {}
 	s.round_number = int(d.get("round", 1))
 	s.current_player = int(d.get("current_player", 0))
 	for p in d.get("players", []):

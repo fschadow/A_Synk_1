@@ -23,7 +23,7 @@ const ACT_WALK := "walk"
 const ACT_COLLECT := "collect"  # Aeste + Obst/Laub vom Baum, waechst nach
 const ACT_FELL := "fell"        # Baum faellen: Holz, Baum ist fuer immer weg
 const ACT_MINE := "mine"        # Steinhaufen abbauen, leer = weg
-const ACT_FISH := "fish"        # auf Pfuetzen fischen, waechst nach
+const ACT_FISH := "fish"        # an Pfuetzen und Gewaessern fischen, waechst nach
 
 ## Was es kostet, einmal abzubauen (in Schritten).
 const ACTION_STEP_COST := 1
@@ -81,6 +81,26 @@ const REGROWS := {
 }
 
 
+## Was "Sammeln" am Baum je Jahreszeit zusaetzlich bringt
+## (Fruehling Bluete -> Laub, Sommer -> Obst, Herbst -> Laub, Winter nichts).
+const SEASON_EXTRA := [LAUB, OBST, LAUB, ""]
+
+
+## Startvorrat eines Objekts (Gewaesser: siehe Terrain.FISH_STOCK).
+static func stock(kind: String) -> int:
+	if Terrain.FISH_STOCK.has(kind):
+		return Terrain.FISH_STOCK[kind]
+	return STOCK.get(kind, 0)
+
+
+static func regrows(kind: String) -> bool:
+	return Terrain.FISH_STOCK.has(kind) or REGROWS.get(kind, false)
+
+
+static func is_tree(kind: String) -> bool:
+	return TREE_KINDS.has(kind)
+
+
 ## Passt diese Faehigkeit zu dieser Objektart?
 static func action_fits(action: String, kind: String) -> bool:
 	match action:
@@ -89,17 +109,19 @@ static func action_fits(action: String, kind: String) -> bool:
 		ACT_MINE:
 			return kind == KIND_STONE
 		ACT_FISH:
-			return kind == KIND_PUDDLE
+			return kind == KIND_PUDDLE or Terrain.is_water(kind)
 	return false
 
 
 ## Was eine Aktion an diesem Objekt einbringt: {item: menge}.
-static func yields(action: String, kind: String) -> Dictionary:
+## season -1 = ohne Jahreszeiten (dann zaehlt die Baumart).
+static func yields(action: String, kind: String, season := -1) -> Dictionary:
 	match action:
 		ACT_COLLECT:
 			var y := {AESTE: 1}
-			if COLLECT_EXTRA.has(kind):
-				y[COLLECT_EXTRA[kind]] = 1
+			var extra: String = SEASON_EXTRA[season] if season >= 0 else COLLECT_EXTRA.get(kind, "")
+			if extra != "":
+				y[extra] = 1
 			return y
 		ACT_FELL:
 			return {HOLZ: FELL_WOOD}

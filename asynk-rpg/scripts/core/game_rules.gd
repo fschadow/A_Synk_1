@@ -31,13 +31,48 @@ const MAX_PLAYERS := 20
 ## Liefert {} wenn das Ziel nicht (mit den restlichen Schritten) erreichbar ist.
 static func make_move_to(state: GameState, map: HexMap, target: Vector2i) -> Dictionary:
 	var me := state.current()
-	var path := map.find_path(me["pos"], target, state.occupied_cells(state.current_player), me["steps_left"])
-	if path.is_empty() or path.size() > me["steps_left"]:
+	var cost := cost_func(state, map)
+	var path := map.find_path(me["pos"], target, state.occupied_cells(state.current_player), me["steps_left"], cost)
+	if path.is_empty():
+		return {}
+	var total := map.path_cost(path, cost)
+	if total > me["steps_left"]:
 		return {}
 	var p := []
 	for c in path:
 		p.append([c.x, c.y])
-	return {"type": TYPE_MOVE, "player": state.current_player, "round": state.round_number, "path": p}
+	return {"type": TYPE_MOVE, "player": state.current_player, "round": state.round_number, "path": p, "cost": total}
+
+
+## Schritte, um ein Feld zu betreten (0 = geht nicht), je nach Gelaende,
+## Jahreszeit und Winterhaerte.
+static func step_cost(state: GameState, map: HexMap, cell: Vector2i) -> int:
+	if not map.is_walkable(cell):
+		return 0
+	return Terrain.move_cost(map.kind_at(cell), state.season(), state.winter_level())
+
+
+static func cost_func(state: GameState, map: HexMap) -> Callable:
+	var season := state.season()
+	var winter := state.winter_level()
+	return func(cell: Vector2i) -> int:
+		return Terrain.move_cost(map.kind_at(cell), season, winter) if map.is_walkable(cell) else 0
+
+
+## Von wo aus kann man an diesem Objekt arbeiten? Gewaesser vom Feld selbst
+## (falls begehbar) oder einem Nachbarfeld, alles andere nur darauf stehend.
+static func work_cells(state: GameState, map: HexMap, id: String) -> Array[Vector2i]:
+	var cell := WorldObjects.id_cell(id)
+	var out: Array[Vector2i] = []
+	if WorldObjects.id_slot(id) != WorldObjects.SLOT_WATER:
+		out.append(cell)
+		return out
+	if step_cost(state, map, cell) > 0:
+		out.append(cell)
+	for n in map.neighbors(cell):
+		if step_cost(state, map, n) > 0:
+			out.append(n)
+	return out
 
 
 ## Findet auf einem Feld das Objekt, an dem diese Aktion gerade moeglich ist
@@ -47,6 +82,8 @@ static func find_target(state: GameState, objects: WorldObjects, cell: Vector2i,
 		return ""
 	for id in objects.ids_at(cell):
 		var kind := objects.kind(id)
+		if Terrain.is_water(kind) and not Terrain.can_fish(kind, state.season(), state.winter_level()):
+			continue
 		if ResourceConfig.action_fits(action, kind) and not state.is_gone(id) 				and (action == ResourceConfig.ACT_FELL or state.resource_amount(id, kind) > 0):
 			return id
 	return ""
@@ -61,12 +98,18 @@ static func make_action_at(state: GameState, map: HexMap, objects: WorldObjects,
 	var moves: Array[Dictionary] = []
 	var me := state.current()
 	var walk_steps := 0
-	if me["pos"] != cell:
-		var walk := make_move_to(state, map, cell)
-		if walk.is_empty():
+	var spots := work_cells(state, map, target)
+	if not spots.has(me["pos"]):
+		# Zum guenstigsten Feld laufen, von dem aus man arbeiten kann.
+		var best := {}
+		for spot in spots:
+			var w := make_move_to(state, map, spot)
+			if not w.is_empty() and (best.is_empty() or w["cost"] < best["cost"]):
+				best = w
+		if best.is_empty():
 			return {"error": "Feld nicht erreichbar"}
-		walk_steps = walk["path"].size()
-		moves.append(walk)
+		walk_steps = best["cost"]
+		moves.append(best)
 	if walk_steps + ResourceConfig.ACTION_STEP_COST > me["steps_left"]:
 		return {"error": "Nicht genug Schritte zum Hinlaufen und Abbauen"}
 	var harvest := {"type": TYPE_HARVEST, "player": state.current_player, "round": state.round_number,
@@ -117,22 +160,27 @@ static func validate(state: GameState, map: HexMap, move: Dictionary, objects: W
 			if path.is_empty():
 				return "Leerer Weg"
 			var me := state.players[player]
-			if path.size() > me["steps_left"]:
-				return "Nicht genug Schritte (%d uebrig)" % me["steps_left"]
 			var blocked := state.occupied_cells(player)
 			var prev: Vector2i = me["pos"]
+			var total := 0
 			for raw in path:
 				var c := _cell(raw)
 				if not map.are_neighbors(prev, c):
 					return "Weg springt von %s nach %s" % [prev, c]
-				if not map.is_walkable(c):
-					return "Feld %s ist nicht begehbar" % c
+				var step := step_cost(state, map, c)
+				if step <= 0:
+					return _blocked_reason(state, map, c)
 				if blocked.has(c):
 					return "Feld %s ist besetzt" % c
+				total += step
 				prev = c
+			if total > me["steps_left"]:
+				return "Nicht genug Schritte (%d nötig, %d übrig)" % [total, me["steps_left"]]
+			if move.has("cost") and int(move["cost"]) != total:
+				return "Schrittkosten passen nicht"
 			return ""
 		TYPE_HARVEST:
-			return _validate_harvest(state, move, objects)
+			return _validate_harvest(state, map, move, objects)
 		_:
 			return "Unbekannter Zugtyp %s" % move.get("type")
 
@@ -158,7 +206,16 @@ static func _validate_join(state: GameState, map: HexMap, move: Dictionary) -> S
 	return ""
 
 
-static func _validate_harvest(state: GameState, move: Dictionary, objects: WorldObjects) -> String:
+static func _blocked_reason(state: GameState, map: HexMap, c: Vector2i) -> String:
+	var k := map.kind_at(c)
+	if (k == Terrain.POND or k == Terrain.LAKE or k == Terrain.SHALLOW) and state.season() != Terrain.SUMMER:
+		return "Zu kalt zum Schwimmen – nur im Sommer"
+	if k == Terrain.DEEP or k == Terrain.OCEAN:
+		return "Zu tief zum Schwimmen"
+	return "Feld %s ist nicht begehbar" % c
+
+
+static func _validate_harvest(state: GameState, map: HexMap, move: Dictionary, objects: WorldObjects) -> String:
 	if objects == null:
 		return "Keine Kartenobjekte bekannt"
 	var me := state.players[int(move["player"])]
@@ -169,15 +226,19 @@ static func _validate_harvest(state: GameState, move: Dictionary, objects: World
 		return _nothing_here(action)
 	if str(move.get("kind", "")) != kind:
 		return "Objektart passt nicht zur Karte"
-	if WorldObjects.id_cell(target) != me["pos"]:
+	if not work_cells(state, map, target).has(me["pos"]):
+		if WorldObjects.id_slot(target) == WorldObjects.SLOT_WATER:
+			return "Die Figur muss am Ufer stehen"
 		return "Die Figur muss auf dem Feld stehen"
+	if Terrain.is_water(kind) and not Terrain.can_fish(kind, state.season(), state.winter_level()):
+		return "Zugefroren – hier kann man nicht fischen"
 	if me["steps_left"] < ResourceConfig.ACTION_STEP_COST:
 		return "Keine Schritte mehr übrig"
 	if state.is_gone(target):
 		return _nothing_here(action)
 	if action != ResourceConfig.ACT_FELL and state.resource_amount(target, kind) <= 0:
-		return "Leer, wächst in einigen Runden nach" if ResourceConfig.REGROWS.get(kind, false) else "Leer"
-	var y := ResourceConfig.yields(action, kind)
+		return "Leer, wächst in einigen Runden nach" if ResourceConfig.regrows(kind) else "Leer"
+	var y := ResourceConfig.yields(action, kind, state.season())
 	var room := false
 	for item in y:
 		if me["inv"][item] < ResourceConfig.CARRY_LIMIT:
@@ -194,7 +255,7 @@ static func apply(state: GameState, move: Dictionary) -> void:
 		TYPE_MOVE:
 			var me := state.players[m["player"]]
 			me["pos"] = _cell(m["path"][-1])
-			me["steps_left"] -= m["path"].size()
+			me["steps_left"] -= int(m["cost"]) if m.has("cost") else m["path"].size()
 		TYPE_HARVEST:
 			_apply_harvest(state, m)
 		TYPE_JOIN:
@@ -221,14 +282,14 @@ static func _apply_harvest(state: GameState, m: Dictionary) -> void:
 	var kind: String = m["kind"]
 	var target: String = m["target"]
 	me["steps_left"] -= ResourceConfig.ACTION_STEP_COST
-	var y := ResourceConfig.yields(m["action"], kind)
+	var y := ResourceConfig.yields(m["action"], kind, state.season())
 	for item in y:
 		me["inv"][item] = mini(me["inv"][item] + y[item], ResourceConfig.CARRY_LIMIT)
 	if m["action"] == ResourceConfig.ACT_FELL:
 		state.resources[target] = {"amount": 0, "since": state.round_number, "gone": true}
 		return
 	var left := state.resource_amount(target, kind) - 1
-	var gone: bool = left <= 0 and not ResourceConfig.REGROWS.get(kind, false)
+	var gone: bool = left <= 0 and not ResourceConfig.regrows(kind)
 	state.resources[target] = {"amount": left, "since": state.round_number, "gone": gone}
 
 
@@ -262,6 +323,8 @@ static func normalize_move(move: Dictionary) -> Dictionary:
 	if move.has("pos"):
 		var c := _cell(move["pos"])
 		m["pos"] = [c.x, c.y]
+	if move.has("cost"):
+		m["cost"] = int(move["cost"])
 	return m
 
 

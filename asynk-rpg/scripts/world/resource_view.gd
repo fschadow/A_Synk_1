@@ -19,6 +19,9 @@ func _ready() -> void:
 	_session.game_started.connect(_on_game_started)
 	_session.move_applied.connect(_on_move_applied)
 	_session.turn_started.connect(func(_p, state): _refresh_tint(state))
+	var painter := get_parent().get_node_or_null("MapPainter")
+	if painter:
+		painter.painted.connect(_on_game_started)
 
 
 func _on_game_started(state: GameState) -> void:

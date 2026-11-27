@@ -27,6 +27,9 @@ var _ai_button: Button
 var _settings_box: GridContainer
 var _time_option: OptionButton
 var _season_option: OptionButton
+var _preset_option: OptionButton
+var _size_option: OptionButton
+var _seed_edit: LineEdit
 var _start_button: Button
 var _wait_label: Label
 var _lobby_back: Button
@@ -121,6 +124,22 @@ func _build() -> void:
 		func(i): Net.set_turn_time(Net.TURN_TIMES[i]))
 	_season_option = _option_row("Jahreszeit wechselt alle", Net.SEASON_LENGTHS.map(func(r): return "%d Runden" % r),
 		func(i): Net.set_season_length(Net.SEASON_LENGTHS[i]))
+	_preset_option = _option_row("Karte", MapGen.PRESETS.map(func(p): return MapGen.PRESET_NAMES[p]),
+		func(i): _set_map("preset", MapGen.PRESETS[i]))
+	_size_option = _option_row("Größe", MapGen.SIZE_ORDER.map(func(k): return MapGen.SIZE_NAMES[k]),
+		func(i): _set_map("size", MapGen.SIZE_ORDER[i]))
+	MenuStyle.label(_settings_box, "Seed", 20)
+	var seed_row := HBoxContainer.new()
+	seed_row.add_theme_constant_override("separation", 6)
+	_settings_box.add_child(seed_row)
+	_seed_edit = LineEdit.new()
+	_seed_edit.placeholder_text = "Zufall"
+	_seed_edit.custom_minimum_size.x = 120
+	_seed_edit.add_theme_font_size_override("font_size", 20)
+	_seed_edit.text_submitted.connect(func(t): _set_map("seed", int(t)))
+	_seed_edit.focus_exited.connect(func(): _set_map("seed", int(_seed_edit.text)))
+	seed_row.add_child(_seed_edit)
+	MenuStyle.button(seed_row, "Würfeln", func(): _set_map("seed", randi_range(1, 999999)), 90, 16)
 	_start_button = MenuStyle.button(_lobby_page, "Spiel starten", func(): Net.start_game())
 	_wait_label = MenuStyle.label(_lobby_page, "Warte, bis der Host das Spiel startet …", 18, true)
 	_lobby_back = MenuStyle.button(_lobby_page, "Zurück", _back)
@@ -287,11 +306,36 @@ func _refresh_lobby() -> void:
 	_time_option.select(maxi(0, Net.TURN_TIMES.find(Net.turn_time())))
 	_season_option.disabled = not authority or resume
 	_season_option.select(maxi(0, Net.SEASON_LENGTHS.find(Net.season_length())))
+	# Karte nur bei neuen Spielen; die gemalte Standardkarte hat keine Groesse/Seed.
+	var map_settings := _map_settings()
+	var generated := MapGen.is_generated(map_settings)
+	_preset_option.disabled = not authority or resume
+	_preset_option.select(maxi(0, MapGen.PRESETS.find(map_settings["preset"])))
+	_size_option.disabled = not authority or resume or not generated
+	_size_option.select(maxi(0, MapGen.SIZE_ORDER.find(map_settings["size"])))
+	_seed_edit.editable = authority and not resume and generated
+	var seed_value := int(map_settings.get("seed", 0))
+	if not _seed_edit.has_focus():
+		_seed_edit.text = str(seed_value) if seed_value != 0 else ""
 	_start_button.visible = authority
 	_start_button.disabled = not Net.can_start()
 	_start_button.text = "Spiel starten" if Net.can_start() or Net.is_local() or resume else "Spiel starten (mind. 2 Spieler)"
 	_wait_label.visible = not authority
 	_lobby_back.text = "Zurück" if Net.is_local() else "Lobby verlassen"
+
+
+func _map_settings() -> Dictionary:
+	var m := MapGen.default_settings()
+	m.merge(Net.lobby.get("map", {}), true)
+	return m
+
+
+func _set_map(key: String, value: Variant) -> void:
+	var m := _map_settings()
+	if m.get(key) == value:
+		return
+	m[key] = value
+	Net.set_map(m)
 
 
 func _ip_hint() -> String:

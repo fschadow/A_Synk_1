@@ -16,6 +16,10 @@ func _init() -> void:
 	test_harvest_limits_and_regrow()
 	test_reachable()
 	test_simple_ai()
+	test_join()
+	test_terrain_and_seasons()
+	test_water_rules()
+	test_map_gen()
 	print("%d Checks, %d Fehler" % [_checks, _failures])
 	quit(1 if _failures > 0 else 0)
 
@@ -249,3 +253,135 @@ func test_simple_ai() -> void:
 	var lonely := GameState.new_game(["A", "B"], [Vector2i(5, 0), Vector2i(5, 5)], GameRules.STEPS_PER_TURN, "test")
 	var nothing := WorldObjects.from_dict({})
 	check(SimpleAI.next_moves(lonely, m, nothing).is_empty(), "KI ohne Rohstoffe: Zug beenden")
+
+
+func test_join() -> void:
+	var m := small_map()
+	var s := new_state()
+	var join := GameRules.make_join(s, "Neu", Vector2i(3, 3))
+	check(GameRules.validate(s, m, join) == "", "Neuer Spieler darf einsteigen")
+	GameRules.apply(s, join)
+	check(s.players.size() == 3 and s.players[2]["name"] == "Neu" and s.players[2]["pos"] == Vector2i(3, 3), "Neuer Spieler am Ende")
+	check(GameRules.validate(s, m, GameRules.make_join(s, "X", Vector2i(3, 3))) != "", "Besetztes Startfeld abgelehnt")
+	check(GameRules.validate(s, m, GameRules.make_join(s, "", Vector2i(4, 4))) != "", "Leerer Name abgelehnt")
+	check(GameState.from_json(s.to_json()).players.size() == 3, "Neuer Spieler ueberlebt JSON")
+
+
+func test_terrain_and_seasons() -> void:
+	check(Terrain.season_for(1, 10) == Terrain.SPRING and Terrain.season_for(11, 10) == Terrain.SUMMER, "Fruehling, dann Sommer")
+	check(Terrain.season_for(31, 10) == Terrain.WINTER and Terrain.season_for(41, 10) == Terrain.SPRING, "Winter, dann wieder Fruehling")
+	check(Terrain.year_for(41, 10) == 1, "Nach 4 Jahreszeiten: Jahr 2")
+	check(Terrain.season_for(5, 0) == -1, "Ohne Laenge keine Jahreszeiten")
+	check(Terrain.move_cost(Terrain.RIVER, Terrain.SPRING, 0) == 2, "Fluss kostet 2")
+	check(Terrain.move_cost(Terrain.LAKE, Terrain.SUMMER, 0) == 3, "See im Sommer: schwimmen (3)")
+	check(Terrain.move_cost(Terrain.LAKE, Terrain.AUTUMN, 0) == 0, "See im Herbst: zu kalt")
+	check(Terrain.move_cost(Terrain.DEEP, Terrain.SUMMER, 0) == 0, "Tiefes Meer nie")
+	check(Terrain.move_cost(Terrain.POND, Terrain.WINTER, 0) == 1, "Milder Winter: Teich gefroren")
+	check(Terrain.move_cost(Terrain.LAKE, Terrain.WINTER, 0) == 0, "Milder Winter: See offen")
+	check(Terrain.move_cost(Terrain.LAKE, Terrain.WINTER, 1) == 1, "Normaler Winter: See gefroren")
+	check(Terrain.move_cost(Terrain.SHALLOW, Terrain.WINTER, 2) == 1, "Harter Winter: seichtes Meer gefroren")
+	check(Terrain.move_cost(Terrain.OCEAN, Terrain.WINTER, 2) == 0, "Ozean friert nie")
+	var w1 := Terrain.winter_level_for(5, 0)
+	check(w1 == Terrain.winter_level_for(5, 0), "Winterhaerte ist aus dem Seed reproduzierbar")
+	# Sammeln je Jahreszeit
+	var m := small_map()
+	var o := small_objects()
+	for case in [[1, ResourceConfig.LAUB], [11, ResourceConfig.OBST], [21, ResourceConfig.LAUB], [31, ""]]:
+		var s := GameState.new_game(["A", "B"], [Vector2i(1, 0), Vector2i(5, 5)], GameRules.STEPS_PER_TURN, "t",
+			{"season_length": 10})
+		s.round_number = case[0]
+		for mv in s.history:
+			pass
+		check(run_action(s, m, o, Vector2i(1, 0), ResourceConfig.ACT_COLLECT) == "", "Sammeln in Runde %d" % case[0])
+		var inv: Dictionary = s.current()["inv"]
+		check(inv[ResourceConfig.AESTE] == 1, "Immer ein Ast (Runde %d)" % case[0])
+		var extra := 0
+		for item in [ResourceConfig.LAUB, ResourceConfig.OBST]:
+			extra += inv[item]
+		if case[1] == "":
+			check(extra == 0, "Winter: nur Aeste")
+		else:
+			check(inv[case[1]] == 1, "Runde %d gibt %s" % [case[0], case[1]])
+
+
+## Karte: Reihe Wiese - Fluss - Wiese, darunter ein See.
+func water_map() -> HexMap:
+	var types := {}
+	for x in 6:
+		for y in 6:
+			types[Vector2i(x, y)] = Terrain.GRASS
+	types[Vector2i(2, 0)] = Terrain.RIVER
+	types[Vector2i(3, 3)] = Terrain.LAKE
+	types[Vector2i(5, 5)] = Terrain.DEEP
+	return HexMap.from_types(types)
+
+
+func test_water_rules() -> void:
+	var m := water_map()
+	var o := WorldObjects.from_dict({"3,3,W": Terrain.LAKE})
+	# Fluss kostet 2 Schritte
+	var s := GameState.new_game(["A", "B"], [Vector2i(1, 0), Vector2i(0, 5)], GameRules.STEPS_PER_TURN, "t", {"season_length": 10})
+	var mv := GameRules.make_move_to(s, m, Vector2i(2, 0))
+	check(not mv.is_empty() and mv["cost"] == 2, "Weg in den Fluss kostet 2")
+	GameRules.apply(s, mv)
+	check(s.current()["steps_left"] == GameRules.STEPS_PER_TURN - 2, "2 Schritte abgezogen")
+	var fake := mv.duplicate()
+	fake["cost"] = 1
+	var s2 := GameState.new_game(["A", "B"], [Vector2i(1, 0), Vector2i(0, 5)], GameRules.STEPS_PER_TURN, "t", {"season_length": 10})
+	check(GameRules.validate(s2, m, fake) != "", "Gefaelschte Schrittkosten abgelehnt")
+	# See im Fruehling nicht betretbar, im Sommer schwimmend
+	var spring := GameState.new_game(["A", "B"], [Vector2i(3, 2), Vector2i(0, 5)], GameRules.STEPS_PER_TURN, "t", {"season_length": 10})
+	check(GameRules.make_move_to(spring, m, Vector2i(3, 3)).is_empty(), "Fruehling: kein Schwimmen")
+	var summer := spring.duplicate_state()
+	summer.round_number = 11
+	var swim := GameRules.make_move_to(summer, m, Vector2i(3, 3))
+	check(not swim.is_empty() and swim["cost"] == Terrain.SWIM_COST, "Sommer: Schwimmen kostet 3")
+	# Fischen vom Ufer (Nachbarfeld), ohne Hinlaufen
+	var plan := GameRules.make_action_at(spring, m, o, Vector2i(3, 3), ResourceConfig.ACT_FISH)
+	check(not plan.has("error") and plan["moves"].size() == 1, "Fischen vom Ufer aus: nur der Abbau-Zug")
+	for x in plan.get("moves", []):
+		GameRules.apply(spring, x)
+	check(spring.current()["inv"][ResourceConfig.FISCH] == 1, "Fisch aus dem See")
+	# Von weiter weg: erst ans Ufer laufen
+	var far := GameState.new_game(["A", "B"], [Vector2i(0, 3), Vector2i(0, 5)], GameRules.STEPS_PER_TURN, "t", {"season_length": 10})
+	plan = GameRules.make_action_at(far, m, o, Vector2i(3, 3), ResourceConfig.ACT_FISH)
+	check(not plan.has("error") and plan["moves"].size() == 2, "Erst ans Ufer laufen, dann fischen")
+	if not plan.has("error"):
+		var walk_end := GameRules.path_cells(plan["moves"][0])[-1]
+		check(m.are_neighbors(walk_end, Vector2i(3, 3)), "Ziel ist ein Uferfeld")
+	# Zugefroren: kein Fischen (normaler oder harter Winter friert Seen)
+	var winter := GameState.new_game(["A", "B"], [Vector2i(3, 2), Vector2i(0, 5)], GameRules.STEPS_PER_TURN, "t",
+		{"season_length": 10, "map": {"seed": _seed_with_winter(1)}})
+	winter.round_number = 31
+	check(winter.winter_level() >= 1, "Testwinter ist mindestens normal")
+	check(GameRules.make_action_at(winter, m, o, Vector2i(3, 3), ResourceConfig.ACT_FISH).has("error"), "Gefrorener See: kein Fisch")
+	check(not GameRules.make_move_to(winter, m, Vector2i(3, 3)).is_empty(), "Uebers Eis laufen geht")
+
+
+func _seed_with_winter(min_level: int) -> int:
+	for seed_value in range(1, 200):
+		if Terrain.winter_level_for(seed_value, 0) >= min_level:
+			return seed_value
+	return 1
+
+
+func test_map_gen() -> void:
+	for preset in ["continents", "islands", "pangaea", "inland", "coast"]:
+		var settings := {"preset": preset, "size": "small", "seed": 99}
+		var a := MapGen.generate(settings)
+		var b := MapGen.generate(settings)
+		check(a["types"].size() == 40 * 40, "%s: 40x40 Felder" % preset)
+		check(a["types"] == b["types"] and a["objects"] == b["objects"], "%s: gleicher Seed = gleiche Karte" % preset)
+		check(a["types"].get(a["start"]) == Terrain.GRASS, "%s: Start auf Wiese" % preset)
+		var kinds := {}
+		for c in a["types"]:
+			kinds[a["types"][c]] = true
+		check(kinds.has(Terrain.GRASS) and (kinds.has(Terrain.OCEAN) or kinds.has(Terrain.LAKE) or kinds.has(Terrain.DEEP)),
+			"%s: Land und Wasser" % preset)
+		for c in a["flow"]:
+			check(HexMap.NEIGHBOR_OFFSETS.has(a["flow"][c] - c), "%s: Fluss fliesst zum Nachbarn" % preset)
+			break
+	var c1 := MapGen.generate({"preset": "continents", "size": "small", "seed": 1})
+	var c2 := MapGen.generate({"preset": "continents", "size": "small", "seed": 2})
+	check(c1["types"] != c2["types"], "Anderer Seed = andere Karte")
+	check(MapGen.generate({"preset": "continents", "size": "medium", "seed": 1})["types"].size() == 70 * 70, "Mittel = 70x70")

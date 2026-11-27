@@ -13,6 +13,8 @@ signal game_started(state: GameState)
 signal move_applied(move: Dictionary, state: GameState)
 signal turn_started(player_index: int, state: GameState)
 signal move_rejected(reason: String)
+## Eine Karte wurde erzeugt (MapGen-Ergebnis); kommt vor game_started.
+signal map_ready(gen: Dictionary)
 
 const GROUP := "game_session"
 
@@ -67,7 +69,10 @@ func _start() -> void:
 
 
 func new_game(names: Array = player_names) -> void:
-	state = GameState.new_game(names, pick_start_cells(names.size()), GameRules.STEPS_PER_TURN, scene_file_path_or_name())
+	var settings := new_game_settings()
+	_setup_map(settings)
+	state = GameState.new_game(names, pick_start_cells(names.size()), GameRules.STEPS_PER_TURN,
+		scene_file_path_or_name(), settings)
 	_save()
 	game_started.emit(state)
 	turn_started.emit(state.current_player, state)
@@ -88,8 +93,36 @@ func _start_lan() -> void:
 	Net.attach(self)
 
 
+## Einstellungen fuer ein neues Spiel aus der Lobby (ohne Lobby: gemalte
+## Karte ohne Jahreszeiten). Ein Seed 0 wird hier einmal ausgewuerfelt, damit
+## alle Geraete dieselbe Karte bekommen.
+func new_game_settings() -> Dictionary:
+	if not Net.is_active():
+		return {}
+	var map_settings: Dictionary = MapGen.default_settings()
+	map_settings.merge(Net.lobby.get("map", {}), true)
+	if int(map_settings.get("seed", 0)) == 0:
+		map_settings["seed"] = randi_range(1, 999999)
+	return {"season_length": Net.season_length(), "map": map_settings}
+
+
+## Karte zu den Einstellungen aufbauen: gemalte Karte der Szene oder
+## generierte Karte (dann map_ready, damit MapPainter sie zeichnet).
+func _setup_map(settings: Dictionary) -> void:
+	var map_settings: Dictionary = settings.get("map", {})
+	if not MapGen.is_generated(map_settings):
+		return
+	var gen := MapGen.generate(map_settings)
+	map = HexMap.from_types(gen["types"], gen["flow"])
+	objects = WorldObjects.from_dict(gen["objects"])
+	start_cells = [gen["start"]]
+	map_ready.emit(gen)
+
+
 ## Kompletten Spielstand uebernehmen (LAN-Start, Wiederbeitritt, Neuabgleich).
 func load_state(s: GameState) -> void:
+	if state == null or state.settings != s.settings:
+		_setup_map(s.settings)
 	state = s
 	_save()
 	game_started.emit(state)
@@ -101,7 +134,7 @@ func free_start_cell() -> Vector2i:
 	var taken := state.occupied_cells()
 	var origin: Vector2i = start_cells[0] if not start_cells.is_empty() else taken[0]
 	for c in map.reachable(origin):
-		var ok := not taken.has(c)
+		var ok := not taken.has(c) and map.is_land(c)
 		for t in taken:
 			if map.are_neighbors(t, c):
 				ok = false
@@ -119,13 +152,13 @@ func free_start_cell() -> Vector2i:
 func pick_start_cells(n: int) -> Array:
 	var cells: Array = []
 	for c in start_cells:
-		if cells.size() < n and map.is_walkable(c) and not cells.has(c):
+		if cells.size() < n and map.is_land(c) and not cells.has(c):
 			cells.append(c)
 	if cells.size() < n and not start_cells.is_empty():
 		for c in map.reachable(start_cells[0]):
 			if cells.size() >= n:
 				break
-			var free := true
+			var free := map.is_land(c)
 			for other in cells:
 				if other == c or map.are_neighbors(other, c):
 					free = false

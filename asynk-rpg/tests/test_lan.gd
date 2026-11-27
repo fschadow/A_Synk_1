@@ -67,7 +67,7 @@ func summary(s: GameState) -> String:
 func free_neighbor(s: GameState) -> Vector2i:
 	var me := s.current()
 	for c in Net.session.map.neighbors(me["pos"]):
-		if not s.occupied_cells(s.current_player).has(c):
+		if not s.occupied_cells(s.current_player).has(c) and GameRules.step_cost(s, Net.session.map, c) == 1:
 			return c
 	return me["pos"]
 
@@ -79,6 +79,7 @@ func _host() -> void:
 	check(Net.host_game("Hosti") == "", "Host eroeffnet das Spiel")
 	check(await wait_until(func(): return Net.players().size() == 3, 30.0), "Client + Hotseat-Spieler in der Lobby (3)")
 	Net.set_turn_time(TURN_TIME)
+	Net.set_map({"preset": "continents", "size": "small", "seed": 123})
 	Net.start_game()
 	check(await wait_until(func(): return state() != null, 10.0), "Host ist im Spiel")
 	if state() == null:
@@ -128,7 +129,9 @@ func _host() -> void:
 	var p2 := Net.player_entry(1)
 	check(p2["connected"] and not p2["ai"], "Spieler 2 gehoert wieder dem Client (KI aus)")
 	print("SUMMARY:", summary(s))
-	Net.save_setting("turn_time", 0)  # Testwert nicht als Voreinstellung stehen lassen
+	check(Net.session.map.cell_count() == 1600 and s.settings["map"]["seed"] == 123, "Generierte Karte (Seed 123)")
+	Net.save_setting("turn_time", 0)  # Testwerte nicht als Voreinstellung stehen lassen
+	Net.save_setting("map", {})
 	await get_tree().create_timer(2.0).timeout
 
 
@@ -151,6 +154,7 @@ func _client() -> void:
 	if state() == null:
 		return
 	check(Net.controls(1) and Net.controls(2) and not Net.controls(0), "Client steuert Spieler 2 und 3")
+	check(Net.session.map.cell_count() == 1600, "Client hat dieselbe generierte Karte gebaut")
 
 	# Eigener Zug
 	check(await wait_until(func(): return state().current_player == 1, 15.0), "Spieler 2 ist dran")
