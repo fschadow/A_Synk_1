@@ -18,6 +18,7 @@ config/icon="res://assets/icons/icon.svg"
 [autoload]
 
 Glob="*res://scripts/core/Globals.gd"
+Net="*res://scripts/net/net.gd"
 
 [display]
 

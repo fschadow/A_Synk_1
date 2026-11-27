@@ -1,4 +1,4 @@
-[gd_scene load_steps=13 format=4 uid="uid://bc4iflixqag6m"]
+[gd_scene load_steps=14 format=4 uid="uid://bc4iflixqag6m"]
 
 [ext_resource type="Script" uid="uid://cv5wgn1rdwuia" path="res://scenes/WoldControl.gd" id="1_3m5ht"]
 [ext_resource type="TileSet" uid="uid://djkk3r0isasdg" path="res://Ressurses/tile_set_Teraing.tres" id="1_4vge2"]
@@ -13,6 +13,7 @@
 
 [ext_resource type="Script" path="res://scripts/ui/resource_bar.gd" id="7_rbar"]
 [ext_resource type="Script" path="res://scripts/world/resource_view.gd" id="8_rview"]
+[ext_resource type="Script" path="res://scripts/world/agent_spawner.gd" id="9_spawn"]
 
 [node name="Node2D" type="Node2D"]
 script = ExtResource("1_3m5ht")
@@ -54,6 +55,10 @@ objects_right = NodePath("../Objects/TileMapLayerOR")
 
 [node name="ResourceView" type="Node" parent="."]
 script = ExtResource("8_rview")
+
+[node name="AgentSpawner" type="Node" parent="." node_paths=PackedStringArray("template")]
+script = ExtResource("9_spawn")
+template = NodePath("../Objects/CharacterBody2D")
 
 [node name="Camera2D" type="Camera2D" parent="."]
 unique_name_in_owner = true

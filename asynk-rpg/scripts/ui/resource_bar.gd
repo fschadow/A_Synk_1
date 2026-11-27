@@ -1,6 +1,7 @@
 extends Control
 ## Rohstoff-Leiste oben links: zeigt das Inventar des Spielers, der gerade
-## am Zug ist. Hoert nur auf die GameSession.
+## am Zug ist. Im LAN-Spiel, solange ein anderes Geraet dran ist, das des
+## eigenen Spielers. Hoert nur auf die GameSession.
 
 const SHEET := preload("res://assets/ui/Sprite sheet for Basic Pack.png")
 
@@ -68,9 +69,18 @@ func _build() -> void:
 
 
 func _refresh(state: GameState) -> void:
-	var me := state.current()
+	var me := state.players[_shown_player(state)]
 	_title.text = "Rohstoffe · %s" % me["name"]
 	for item in _values:
 		var n: int = me["inv"][item]
 		var label: Label = _values[item]
 		label.text = "%d" % n if n < ResourceConfig.CARRY_LIMIT else "%d (voll)" % n
+
+
+func _shown_player(state: GameState) -> int:
+	if Net.controls(state.current_player):
+		return state.current_player
+	for i in state.players.size():
+		if Net.controls(i):
+			return i
+	return state.current_player

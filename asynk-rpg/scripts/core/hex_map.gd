@@ -77,3 +77,22 @@ func find_path(from: Vector2i, to: Vector2i, blocked: Array = [], max_steps: int
 		path.push_front(c)
 		c = came_from[c]
 	return path
+
+
+## Alle Felder, die in hoechstens max_steps Schritten erreichbar sind, nach
+## Entfernung sortiert (Startfeld zuerst). Fuer die KI und die Startfelder.
+func reachable(from: Vector2i, blocked: Array = [], max_steps: int = -1) -> Array[Vector2i]:
+	var out: Array[Vector2i] = [from]
+	var dist := {from: 0}
+	var head := 0
+	while head < out.size():
+		var cur: Vector2i = out[head]
+		head += 1
+		if max_steps >= 0 and dist[cur] >= max_steps:
+			continue
+		for n in neighbors(cur):
+			if dist.has(n) or blocked.has(n):
+				continue
+			dist[n] = dist[cur] + 1
+			out.append(n)
+	return out

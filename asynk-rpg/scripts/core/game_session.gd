@@ -5,8 +5,9 @@ extends Node
 ## Die Anzeige (Figuren, HUD) hoert nur auf diese Signale und veraendert den
 ## Spielstand nie selbst.
 ##
-## Spaeter kommt hier der Austausch ueber Google Drive dazu: statt nur lokal
-## werden Zuege dann auch aus der geteilten Datei gelesen bzw. hineingeschrieben.
+## Im LAN-Spiel (siehe Net) gehen Zug-Wuensche eines Clients erst zum Host;
+## der Host prueft, fuehrt aus und schickt die Zuege an alle (apply_remote).
+## Spaeter kommt hier der Austausch ueber Google Drive dazu.
 
 signal game_started(state: GameState)
 signal move_applied(move: Dictionary, state: GameState)
@@ -43,7 +44,14 @@ func _ready() -> void:
 	_start.call_deferred()
 
 
+func _exit_tree() -> void:
+	Net.detach(self)
+
+
 func _start() -> void:
+	if Net.is_active():
+		_start_lan()
+		return
 	if Glob.start_new_game:
 		Glob.start_new_game = false
 		new_game()
@@ -58,20 +66,66 @@ func _start() -> void:
 	turn_started.emit(state.current_player, state)
 
 
-func new_game() -> void:
-	state = GameState.new_game(player_names, start_cells, GameRules.STEPS_PER_TURN, scene_file_path_or_name())
+func new_game(names: Array = player_names) -> void:
+	state = GameState.new_game(names, pick_start_cells(names.size()), GameRules.STEPS_PER_TURN, scene_file_path_or_name())
 	_save()
 	game_started.emit(state)
 	turn_started.emit(state.current_player, state)
 
 
+## LAN: Client bekommt den Stand vom Host, der Host setzt ein gespeichertes
+## Spiel fort oder beginnt ein neues mit den Spielern aus der Lobby.
+func _start_lan() -> void:
+	var s := Net.take_start_state()
+	if s == null and Net.is_host():
+		new_game(Net.player_names())
+	elif s != null:
+		load_state(s)
+	else:
+		Net.last_error = "Kein Spielstand vom Host erhalten."
+		Glob.go_to_menu()
+		return
+	Net.attach(self)
+
+
+## Kompletten Spielstand uebernehmen (LAN-Start, Wiederbeitritt, Neuabgleich).
+func load_state(s: GameState) -> void:
+	state = s
+	_save()
+	game_started.emit(state)
+	turn_started.emit(state.current_player, state)
+
+
+## Startfelder fuer n Spieler: erst die eingestellten, dann weitere begehbare
+## Felder in der Naehe, die nicht direkt nebeneinander liegen.
+func pick_start_cells(n: int) -> Array:
+	var cells: Array = []
+	for c in start_cells:
+		if cells.size() < n and map.is_walkable(c) and not cells.has(c):
+			cells.append(c)
+	if cells.size() < n and not start_cells.is_empty():
+		for c in map.reachable(start_cells[0]):
+			if cells.size() >= n:
+				break
+			var free := true
+			for other in cells:
+				if other == c or map.are_neighbors(other, c):
+					free = false
+					break
+			if free:
+				cells.append(c)
+	return cells
+
+
 ## Versucht, den aktuellen Spieler auf das Feld zu bewegen.
 func request_move_to(cell: Vector2i) -> bool:
+	if not _may_act():
+		return false
 	var move := GameRules.make_move_to(state, map, cell)
 	if move.is_empty():
 		move_rejected.emit("Feld nicht erreichbar")
 		return false
-	return submit(move)
+	return _request([move])
 
 
 ## Mit gewaehlter Faehigkeit auf ein Feld getippt: hinlaufen (falls noetig)
@@ -79,33 +133,92 @@ func request_move_to(cell: Vector2i) -> bool:
 func request_action(cell: Vector2i, action: String) -> bool:
 	if action == ResourceConfig.ACT_WALK:
 		return request_move_to(cell)
+	if not _may_act():
+		return false
 	var plan := GameRules.make_action_at(state, map, objects, cell, action)
 	if plan.has("error"):
 		move_rejected.emit(plan["error"])
 		return false
-	for m in plan["moves"]:
+	return _request(plan["moves"])
+
+
+func request_end_turn() -> bool:
+	if not _may_act():
+		return false
+	return _request([GameRules.make_end_turn(state)])
+
+
+## Darf dieses Geraet gerade ziehen? (Im LAN: eigener Spieler und keine Pause.)
+func _may_act() -> bool:
+	if state == null:
+		return false
+	var who: String = state.current()["name"]
+	if Net.is_paused(state):
+		move_rejected.emit("Spiel pausiert – %s fehlt" % who)
+		return false
+	if not Net.controls(state.current_player):
+		move_rejected.emit("%s ist dran" % who)
+		return false
+	return true
+
+
+## Zuege dieses Geraets: lokal direkt ausfuehren, als LAN-Client erst
+## vorpruefen und dann an den Host schicken.
+func _request(moves: Array) -> bool:
+	if Net.is_client():
+		var sim := state.duplicate_state()
+		for m in moves:
+			var err := GameRules.validate(sim, map, m, objects)
+			if err != "":
+				move_rejected.emit(err)
+				return false
+			GameRules.apply(sim, m)
+		Net.send_moves(moves)
+		return true
+	for m in moves:
 		if not submit(m):
 			return false
 	return true
 
 
-func request_end_turn() -> bool:
-	return submit(GameRules.make_end_turn(state))
-
-
-## Einziger Weg, den Spielstand zu aendern.
+## Einziger Weg, den Spielstand zu aendern (lokal bzw. auf dem Host).
 func submit(move: Dictionary) -> bool:
-	var err := GameRules.validate(state, map, move, objects)
+	var err := try_submit(move)
 	if err != "":
 		move_rejected.emit(err)
 		return false
+	return true
+
+
+## Wie submit(), meldet einen Fehler aber nicht per Signal, sondern gibt ihn
+## zurueck (fuer Zuege anderer Geraete, der KI und der Zuguhr).
+func try_submit(move: Dictionary) -> String:
+	var err := GameRules.validate(state, map, move, objects)
+	if err != "":
+		return err
+	_apply(move)
+	_save()
+	return ""
+
+
+## LAN-Client: Zug, den der Host schon ausgefuehrt hat, uebernehmen.
+func apply_remote(move: Dictionary) -> void:
+	if state == null:
+		return
+	var err := GameRules.validate(state, map, move, objects)
+	if err != "":
+		push_warning("LAN: Zug vom Host passt nicht (%s), hole Spielstand neu" % err)
+		Net.request_sync()
+		return
+	_apply(move)
+
+
+func _apply(move: Dictionary) -> void:
 	var before_player := state.current_player
 	GameRules.apply(state, move)
-	_save()
 	move_applied.emit(state.history[-1], state)
 	if state.current_player != before_player:
 		turn_started.emit(state.current_player, state)
-	return true
 
 
 ## true, wenn ein Spielstand existiert (fuer "Weiterspielen" im Startmenue).
@@ -126,9 +239,9 @@ func load_game() -> GameState:
 
 
 func _save() -> void:
-	if not autosave:
+	if not autosave or Net.is_client():
 		return
-	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
+	var f := FileAccess.open(Net.STATE_SAVE if Net.is_host() else SAVE_PATH, FileAccess.WRITE)
 	if f:
 		f.store_string(state.to_json())
 

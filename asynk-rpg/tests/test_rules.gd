@@ -14,6 +14,8 @@ func _init() -> void:
 	test_serialization_and_replay()
 	test_harvest()
 	test_harvest_limits_and_regrow()
+	test_reachable()
+	test_simple_ai()
 	print("%d Checks, %d Fehler" % [_checks, _failures])
 	quit(1 if _failures > 0 else 0)
 
@@ -209,3 +211,41 @@ func test_harvest_limits_and_regrow() -> void:
 	u.players[0]["inv"][ResourceConfig.AESTE] = ResourceConfig.CARRY_LIMIT
 	check(run_action(u, m, o, Vector2i(1, 0), ResourceConfig.ACT_COLLECT) == "", "Sammeln geht, solange Obst noch Platz hat")
 	check(u.players[0]["inv"][ResourceConfig.AESTE] == ResourceConfig.CARRY_LIMIT, "Aeste bleiben bei der Grenze")
+
+
+func test_reachable() -> void:
+	var m := small_map()
+	var cells := m.reachable(Vector2i(0, 0), [], 1)
+	check(cells[0] == Vector2i(0, 0), "reachable: Startfeld zuerst")
+	check(cells.size() == 1 + m.neighbors(Vector2i(0, 0)).size(), "reachable(1): Start + Nachbarn")
+	check(not m.reachable(Vector2i(0, 0)).has(Vector2i(2, 2)), "reachable: Loch ist nicht dabei")
+	check(m.reachable(Vector2i(0, 0)).size() == m.cell_count(), "reachable: ganze Karte zusammenhaengend")
+
+
+func test_simple_ai() -> void:
+	var m := small_map()
+	var o := small_objects()
+	var s := new_state()
+	# Die KI spielt einen ganzen Zug: sammelt, bis die Schritte alle sind.
+	var rounds := 0
+	while rounds < 10:
+		rounds += 1
+		var moves := SimpleAI.next_moves(s, m, o)
+		if moves.is_empty():
+			break
+		for mv in moves:
+			check(GameRules.validate(s, m, mv, o) == "", "KI-Zug ist gueltig: %s" % mv)
+			check(mv.get("action", "") != ResourceConfig.ACT_FELL, "KI faellt keine Baeume")
+			GameRules.apply(s, mv)
+	check(s.current()["steps_left"] < ResourceConfig.ACTION_STEP_COST, "KI hat ihre Schritte genutzt")
+	var total := 0
+	for item in s.current()["inv"]:
+		total += s.current()["inv"][item]
+	check(total > 0, "KI hat etwas gesammelt (%d)" % total)
+	for id in s.resources:
+		check(not s.resources[id]["gone"] or o.kind(id) == ResourceConfig.KIND_STONE or o.kind(id) == ResourceConfig.KIND_PUDDLE,
+			"KI hat keinen Baum gefaellt (%s)" % id)
+	# Nichts in Reichweite: leere Liste
+	var lonely := GameState.new_game(["A", "B"], [Vector2i(5, 0), Vector2i(5, 5)], GameRules.STEPS_PER_TURN, "test")
+	var nothing := WorldObjects.from_dict({})
+	check(SimpleAI.next_moves(lonely, m, nothing).is_empty(), "KI ohne Rohstoffe: Zug beenden")

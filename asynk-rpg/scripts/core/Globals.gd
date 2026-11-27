@@ -10,6 +10,7 @@ var MouseOnUI : bool
 
 const MENU_SCENE := "res://scenes/main_menu.tscn"
 const GAME_SCENE := "res://scenes/node_2d.tscn"
+const LAN_SCENE := "res://scenes/lan_menu.tscn"
 
 ## Vom Startmenue gesetzt: true = "Neues Spiel" (alten Spielstand verwerfen),
 ## false = "Weiterspielen" (gespeicherten Spielstand laden).
@@ -35,8 +36,18 @@ func start_game(new_game: bool) -> void:
 	get_tree().change_scene_to_file(GAME_SCENE)
 
 
+## Wechselt in ein LAN-Spiel. Den Spielstand liefert Net (Host/Client).
+func start_lan_game() -> void:
+	start_new_game = false
+	_reset_ui_state()
+	get_tree().change_scene_to_file(GAME_SCENE)
+
+
+## Zurueck ins Hauptmenue. Ein laufendes LAN-Spiel wird dabei verlassen.
 func go_to_menu() -> void:
 	_reset_ui_state()
+	if Net.is_active():
+		Net.leave()
 	get_tree().change_scene_to_file(MENU_SCENE)
 
 
