@@ -87,6 +87,28 @@ func _ready() -> void:
 		check(s.players[0]["inv"][ResourceConfig.HOLZ] == ResourceConfig.FELL_WOOD, "Holz im Inventar")
 		await get_tree().create_timer(1.2).timeout
 		check(layer.get_cell_source_id(cell) == -1, "Gefaellter Baum ist von der Karte verschwunden")
+	# --- Leer gesammelter Baum wird blass und nach dem Nachwachsen wieder normal ---
+	var view = world.get_node("ResourceView")
+	var empty_id := ""
+	for id in session.objects._kinds:
+		if id != tree_id and ResourceConfig.TREE_KINDS.has(session.objects.kind(id)) and WorldObjects.id_slot(id) != "T":
+			empty_id = id
+			break
+	if empty_id != "":
+		var ecell := WorldObjects.id_cell(empty_id)
+		var elayer: TileMapLayer = session.objects_left if WorldObjects.id_slot(empty_id) == "L" else session.objects_right
+		var coords_before := elayer.get_cell_atlas_coords(ecell)
+		s.resources[empty_id] = {"amount": 0, "since": s.round_number, "gone": false}
+		view._refresh_tint(s)
+		check(view.is_dimmed(elayer, ecell), "Leerer Baum ist blass")
+		check(elayer.get_cell_atlas_coords(ecell) == coords_before, "Blasser Baum behaelt sein Aussehen")
+		var saved_round := s.round_number
+		s.round_number += ResourceConfig.REGROW_ROUNDS
+		view._refresh_tint(s)
+		check(not view.is_dimmed(elayer, ecell), "Nachgewachsener Baum ist wieder normal")
+		s.round_number = saved_round
+		s.resources.erase(empty_id)
+
 	var bar = world.get_node("CanvasLayer/ResourceBar")
 	check(bar._values[ResourceConfig.HOLZ].text == str(ResourceConfig.FELL_WOOD), "Rohstoffleiste zeigt das Holz")
 

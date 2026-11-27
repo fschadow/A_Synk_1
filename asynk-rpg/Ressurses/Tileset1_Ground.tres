@@ -7,7 +7,6 @@
 texture = ExtResource("1_bcdwf")
 texture_region_size = Vector2i(256, 256)
 0:0/0 = 0
-0:1/0 = 0
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_0e48y"]
 texture = ExtResource("2_bcdwf")
