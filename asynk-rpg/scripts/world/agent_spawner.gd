@@ -27,6 +27,13 @@ func _ready() -> void:
 	var session := get_tree().get_first_node_in_group(GameSession.GROUP) as GameSession
 	if session:
 		session.game_started.connect(_on_game_started)
+		session.move_applied.connect(_on_move_applied)
+
+
+## Neuer Spieler steigt ins laufende Spiel ein: Figur dazu erzeugen.
+func _on_move_applied(move: Dictionary, state: GameState) -> void:
+	if move["type"] == GameRules.TYPE_JOIN:
+		_on_game_started(state)
 
 
 func _on_game_started(state: GameState) -> void:

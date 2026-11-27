@@ -77,7 +77,7 @@ func new_game(names: Array = player_names) -> void:
 ## Spiel fort oder beginnt ein neues mit den Spielern aus der Lobby.
 func _start_lan() -> void:
 	var s := Net.take_start_state()
-	if s == null and Net.is_host():
+	if s == null and Net.is_authority():
 		new_game(Net.player_names())
 	elif s != null:
 		load_state(s)
@@ -94,6 +94,24 @@ func load_state(s: GameState) -> void:
 	_save()
 	game_started.emit(state)
 	turn_started.emit(state.current_player, state)
+
+
+## Freies Startfeld fuer einen neu einsteigenden Spieler.
+func free_start_cell() -> Vector2i:
+	var taken := state.occupied_cells()
+	var origin: Vector2i = start_cells[0] if not start_cells.is_empty() else taken[0]
+	for c in map.reachable(origin):
+		var ok := not taken.has(c)
+		for t in taken:
+			if map.are_neighbors(t, c):
+				ok = false
+				break
+		if ok:
+			return c
+	for c in map.reachable(origin):
+		if not taken.has(c):
+			return c
+	return origin
 
 
 ## Startfelder fuer n Spieler: erst die eingestellten, dann weitere begehbare
@@ -211,6 +229,7 @@ func apply_remote(move: Dictionary) -> void:
 		Net.request_sync()
 		return
 	_apply(move)
+	_save()
 
 
 func _apply(move: Dictionary) -> void:
@@ -221,9 +240,14 @@ func _apply(move: Dictionary) -> void:
 		turn_started.emit(state.current_player, state)
 
 
-## true, wenn ein Spielstand existiert (fuer "Weiterspielen" im Startmenue).
+## true, wenn der alte Einzel-Spielstand existiert (Szene ohne Lobby gestartet).
 static func has_savegame() -> bool:
 	return FileAccess.file_exists(SAVE_PATH)
+
+
+## Sofort speichern (z. B. nach Lobby-Aenderungen im laufenden Spiel).
+func save_now() -> void:
+	_save()
 
 
 func load_game() -> GameState:
@@ -238,10 +262,15 @@ func load_game() -> GameState:
 	return s
 
 
+## Spiele mit Lobby landen in SaveStore (auf jedem beteiligten Geraet, auch
+## als LAN-Client), die Szene ohne Lobby (Tests/Editor) im alten Einzelstand.
 func _save() -> void:
-	if not autosave or Net.is_client():
+	if not autosave or state == null:
 		return
-	var f := FileAccess.open(Net.STATE_SAVE if Net.is_host() else SAVE_PATH, FileAccess.WRITE)
+	if Net.is_active():
+		SaveStore.save(Net.lobby.get("id", ""), state, Net.lobby)
+		return
+	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if f:
 		f.store_string(state.to_json())
 

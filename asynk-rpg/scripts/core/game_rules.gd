@@ -6,6 +6,10 @@ extends RefCounted
 ##   {"type": "move",     "player": 0, "round": 1, "path": [[x, y], ...]}
 ##   {"type": "end_turn", "player": 0, "round": 1}
 ##   {"type": "harvest",  "player": 0, "round": 1, "action": "collect", "target": "x,y,L"}
+##   {"type": "join",     "player": 3, "round": 5, "name": "Mia", "pos": [x, y]}
+##
+## "join": ein neuer Spieler steigt in ein laufendes Spiel ein (nur der Host
+## erzeugt diesen Zug). Er kommt ans Ende der Zugreihenfolge.
 ##
 ## Abbauen ("harvest"): Die Figur muss auf dem Feld des Objekts stehen; die
 ## Zahlen dazu stehen in ResourceConfig, die Objekte in WorldObjects.
@@ -19,6 +23,8 @@ const STEPS_PER_TURN := 4
 const TYPE_MOVE := "move"
 const TYPE_END_TURN := "end_turn"
 const TYPE_HARVEST := "harvest"
+const TYPE_JOIN := "join"
+const MAX_PLAYERS := 20
 
 
 ## Baut einen Bewegungszug fuer den aktuellen Spieler zum Zielfeld.
@@ -96,6 +102,8 @@ static func make_end_turn(state: GameState) -> Dictionary:
 ## Gibt "" zurueck, wenn der Zug erlaubt ist, sonst eine Fehlermeldung.
 ## objects wird nur fuer Abbau-Zuege gebraucht.
 static func validate(state: GameState, map: HexMap, move: Dictionary, objects: WorldObjects = null) -> String:
+	if move.get("type") == TYPE_JOIN:
+		return _validate_join(state, map, move)
 	var player := int(move.get("player", -1))
 	if player != state.current_player:
 		return "Spieler %d ist nicht am Zug" % (player + 1)
@@ -127,6 +135,27 @@ static func validate(state: GameState, map: HexMap, move: Dictionary, objects: W
 			return _validate_harvest(state, move, objects)
 		_:
 			return "Unbekannter Zugtyp %s" % move.get("type")
+
+
+## Zug fuer einen neuen Spieler, der auf `pos` startet.
+static func make_join(state: GameState, player_name: String, pos: Vector2i) -> Dictionary:
+	return {"type": TYPE_JOIN, "player": state.players.size(), "round": state.round_number,
+		"name": player_name, "pos": [pos.x, pos.y]}
+
+
+static func _validate_join(state: GameState, map: HexMap, move: Dictionary) -> String:
+	if int(move.get("player", -1)) != state.players.size():
+		return "Falsche Spielernummer fuer neuen Spieler"
+	if state.players.size() >= MAX_PLAYERS:
+		return "Spiel ist voll (%d Spieler)" % MAX_PLAYERS
+	if int(move.get("round", -1)) != state.round_number:
+		return "Beitritt gehoert zu einer anderen Runde"
+	if str(move.get("name", "")).strip_edges() == "":
+		return "Neuer Spieler braucht einen Namen"
+	var pos := _cell(move.get("pos", [0, 0]))
+	if not map.is_walkable(pos) or state.occupied_cells().has(pos):
+		return "Startfeld %s ist nicht frei" % pos
+	return ""
 
 
 static func _validate_harvest(state: GameState, move: Dictionary, objects: WorldObjects) -> String:
@@ -168,6 +197,14 @@ static func apply(state: GameState, move: Dictionary) -> void:
 			me["steps_left"] -= m["path"].size()
 		TYPE_HARVEST:
 			_apply_harvest(state, m)
+		TYPE_JOIN:
+			state.players.append({
+				"id": "p%d" % (state.players.size() + 1),
+				"name": m["name"],
+				"pos": _cell(m["pos"]),
+				"steps_left": 0,
+				"inv": ResourceConfig.empty_inventory(),
+			})
 		TYPE_END_TURN:
 			state.players[state.current_player]["steps_left"] = 0
 			state.current_player = (state.current_player + 1) % state.players.size()
@@ -219,9 +256,12 @@ static func normalize_move(move: Dictionary) -> Dictionary:
 			var c := _cell(raw)
 			p.append([c.x, c.y])
 		m["path"] = p
-	for key in ["action", "target", "kind"]:
+	for key in ["action", "target", "kind", "name"]:
 		if move.has(key):
 			m[key] = str(move[key])
+	if move.has("pos"):
+		var c := _cell(move["pos"])
+		m["pos"] = [c.x, c.y]
 	return m
 
 

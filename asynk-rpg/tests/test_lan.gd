@@ -28,6 +28,7 @@ func check(cond: bool, what: String) -> void:
 func _ready() -> void:
 	# Den Testknoten beim Szenenwechsel ins Spiel nicht mitloeschen.
 	get_tree().current_scene = null
+	SaveStore.dir = "user://test_saves_lan"
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--role="):
 			_role = arg.substr(7)

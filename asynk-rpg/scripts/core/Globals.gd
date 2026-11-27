@@ -12,6 +12,19 @@ const MENU_SCENE := "res://scenes/main_menu.tscn"
 const GAME_SCENE := "res://scenes/node_2d.tscn"
 const LAN_SCENE := "res://scenes/lan_menu.tscn"
 
+## Mit welcher Seite das Spiel-Menue (Lobby) oeffnet.
+const MENU_NEW := "new"      # neues lokales Spiel
+const MENU_LOAD := "load"    # Spielstand laden
+const MENU_LAN := "lan"      # LAN-Spiel suchen/eroeffnen
+const MENU_SLOTS := "slots"  # im laufenden LAN-Spiel Platz waehlen
+var menu_entry := MENU_LAN
+
+## Oeffnet das Spiel-Menue (Lobby/Laden/LAN) auf der gewuenschten Seite.
+func open_game_menu(entry: String) -> void:
+	menu_entry = entry
+	_reset_ui_state()
+	get_tree().change_scene_to_file(LAN_SCENE)
+
 ## Vom Startmenue gesetzt: true = "Neues Spiel" (alten Spielstand verwerfen),
 ## false = "Weiterspielen" (gespeicherten Spielstand laden).
 var start_new_game := false

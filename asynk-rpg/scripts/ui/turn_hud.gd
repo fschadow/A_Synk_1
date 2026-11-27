@@ -160,7 +160,7 @@ func _refresh(state: GameState) -> void:
 	var me := state.current()
 	var who: String = me["name"]
 	if Net.is_active():
-		if Net.controls(state.current_player):
+		if Net.is_networked() and Net.controls(state.current_player):
 			who += " (du)"
 		elif Net.is_ai(state.current_player):
 			who += " (KI)"
