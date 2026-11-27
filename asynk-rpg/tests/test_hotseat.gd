@@ -109,6 +109,31 @@ func _ready() -> void:
 		s.round_number = saved_round
 		s.resources.erase(empty_id)
 
+	# --- Tier-Dorf: Grafik, Antippen oeffnet den Dialog, Auftrag abgeben ---
+	check(world.village_view.count() >= 1, "Doerfer auf der Standardkarte (%d)" % world.village_view.count())
+	var vid := ""
+	for id in session.objects.ids():
+		if Villages.is_village(session.objects.kind(id)):
+			vid = id
+			break
+	if vid != "":
+		var vcell := WorldObjects.id_cell(vid)
+		var vscreen: Vector2 = world.get_canvas_transform() * terrain.to_global(terrain.map_to_local(vcell))
+		world._on_tap(vscreen)
+		var dlg = world.get_node("CanvasLayer/VillageDialog")
+		check(dlg.visible, "Tippen aufs Dorf oeffnet den Dialog")
+		# Figur neben das Dorf stellen und die Gegenstaende geben
+		var q := Villages.current_quest(s, session.objects.kind(vid), s.current_player)
+		var spot: Vector2i = session.map.neighbors(vcell)[0]
+		s.players[s.current_player]["pos"] = spot
+		for item in q["want"]:
+			s.players[s.current_player]["inv"][item] = q["want"][item]
+		dlg._refresh()
+		check(not dlg._give.disabled, "Abgeben moeglich: " + dlg._status.text)
+		dlg._give.pressed.emit()
+		check(s.players[s.current_player]["quests"].has(q["id"]), "Auftrag erledigt")
+		dlg.close()
+
 	var bar = world.get_node("CanvasLayer/ResourceBar")
 	check(bar._values[ResourceConfig.HOLZ].text == str(ResourceConfig.FELL_WOOD), "Rohstoffleiste zeigt das Holz")
 

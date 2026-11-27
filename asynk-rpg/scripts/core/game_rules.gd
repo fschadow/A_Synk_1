@@ -7,6 +7,7 @@ extends RefCounted
 ##   {"type": "end_turn", "player": 0, "round": 1}
 ##   {"type": "harvest",  "player": 0, "round": 1, "action": "collect", "target": "x,y,L"}
 ##   {"type": "join",     "player": 3, "round": 5, "name": "Mia", "pos": [x, y]}
+##   {"type": "quest",    "player": 0, "round": 2, "target": "x,y,V", "quest": "fuchs_1"}
 ##
 ## "join": ein neuer Spieler steigt in ein laufendes Spiel ein (nur der Host
 ## erzeugt diesen Zug). Er kommt ans Ende der Zugreihenfolge.
@@ -24,6 +25,7 @@ const TYPE_MOVE := "move"
 const TYPE_END_TURN := "end_turn"
 const TYPE_HARVEST := "harvest"
 const TYPE_JOIN := "join"
+const TYPE_QUEST := "quest"
 const MAX_PLAYERS := 20
 
 
@@ -64,7 +66,8 @@ static func cost_func(state: GameState, map: HexMap) -> Callable:
 static func work_cells(state: GameState, map: HexMap, id: String) -> Array[Vector2i]:
 	var cell := WorldObjects.id_cell(id)
 	var out: Array[Vector2i] = []
-	if WorldObjects.id_slot(id) != WorldObjects.SLOT_WATER:
+	var slot := WorldObjects.id_slot(id)
+	if slot != WorldObjects.SLOT_WATER and slot != WorldObjects.SLOT_VILLAGE:
 		out.append(cell)
 		return out
 	if step_cost(state, map, cell) > 0:
@@ -181,6 +184,8 @@ static func validate(state: GameState, map: HexMap, move: Dictionary, objects: W
 			return ""
 		TYPE_HARVEST:
 			return _validate_harvest(state, map, move, objects)
+		TYPE_QUEST:
+			return _validate_quest(state, map, move, objects)
 		_:
 			return "Unbekannter Zugtyp %s" % move.get("type")
 
@@ -203,6 +208,35 @@ static func _validate_join(state: GameState, map: HexMap, move: Dictionary) -> S
 	var pos := _cell(move.get("pos", [0, 0]))
 	if not map.is_walkable(pos) or state.occupied_cells().has(pos):
 		return "Startfeld %s ist nicht frei" % pos
+	return ""
+
+
+## Zug "Auftrag abgeben" fuer den aktuellen Spieler, oder {"error": ...}.
+static func make_quest(state: GameState, objects: WorldObjects, village_id: String) -> Dictionary:
+	var kind := objects.kind(village_id) if objects else ""
+	if not Villages.is_village(kind):
+		return {"error": "Hier ist kein Dorf"}
+	var q := Villages.current_quest(state, kind, state.current_player)
+	if q.is_empty():
+		return {"error": "Keine Aufträge mehr"}
+	return {"type": TYPE_QUEST, "player": state.current_player, "round": state.round_number,
+		"target": village_id, "quest": q["id"]}
+
+
+static func _validate_quest(state: GameState, map: HexMap, move: Dictionary, objects: WorldObjects) -> String:
+	var target := str(move.get("target", ""))
+	var kind := objects.kind(target) if objects else ""
+	if not Villages.is_village(kind):
+		return "Hier ist kein Dorf"
+	var me := state.players[int(move["player"])]
+	if not work_cells(state, map, target).has(me["pos"]):
+		return "Geh näher ans Dorf heran"
+	var q := Villages.current_quest(state, kind, int(move["player"]))
+	if q.is_empty() or q["id"] != str(move.get("quest", "")):
+		return "Dieser Auftrag ist nicht (mehr) offen"
+	for item in q["want"]:
+		if me["inv"][item] < q["want"][item]:
+			return "Dir fehlt noch: %s" % Villages.items_text(q["want"])
 	return ""
 
 
@@ -258,6 +292,14 @@ static func apply(state: GameState, move: Dictionary) -> void:
 			me["steps_left"] -= int(m["cost"]) if m.has("cost") else m["path"].size()
 		TYPE_HARVEST:
 			_apply_harvest(state, m)
+		TYPE_QUEST:
+			var me := state.players[m["player"]]
+			var q := Villages.quest_by_id(m["quest"])
+			for item in q.get("want", {}):
+				me["inv"][item] -= q["want"][item]
+			for item in q.get("reward", {}):
+				me["inv"][item] = mini(me["inv"][item] + q["reward"][item], ResourceConfig.CARRY_LIMIT)
+			me["quests"].append(m["quest"])
 		TYPE_JOIN:
 			state.players.append({
 				"id": "p%d" % (state.players.size() + 1),
@@ -265,6 +307,7 @@ static func apply(state: GameState, move: Dictionary) -> void:
 				"pos": _cell(m["pos"]),
 				"steps_left": 0,
 				"inv": ResourceConfig.empty_inventory(),
+				"quests": [],
 			})
 		TYPE_END_TURN:
 			state.players[state.current_player]["steps_left"] = 0
@@ -317,7 +360,7 @@ static func normalize_move(move: Dictionary) -> Dictionary:
 			var c := _cell(raw)
 			p.append([c.x, c.y])
 		m["path"] = p
-	for key in ["action", "target", "kind", "name"]:
+	for key in ["action", "target", "kind", "name", "quest"]:
 		if move.has(key):
 			m[key] = str(move[key])
 	if move.has("pos"):

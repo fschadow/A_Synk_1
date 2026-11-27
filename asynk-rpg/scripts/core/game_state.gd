@@ -39,6 +39,7 @@ static func new_game(names: Array, start_cells: Array, steps_per_turn: int, p_ma
 			"pos": start_cells[i],
 			"steps_left": steps_per_turn if i == 0 else 0,
 			"inv": ResourceConfig.empty_inventory(),
+			"quests": [],
 		})
 	return s
 
@@ -101,6 +102,7 @@ func to_dict() -> Dictionary:
 			"pos": [p["pos"].x, p["pos"].y],
 			"steps_left": p["steps_left"],
 			"inv": p["inv"].duplicate(),
+			"quests": p.get("quests", []).duplicate(),
 		})
 	return {
 		"version": FORMAT_VERSION,
@@ -128,6 +130,7 @@ static func from_dict(d: Dictionary) -> GameState:
 			"pos": Vector2i(int(p["pos"][0]), int(p["pos"][1])),
 			"steps_left": int(p["steps_left"]),
 			"inv": _read_inventory(p.get("inv", {})),
+			"quests": Array(p.get("quests", [])).map(func(q): return str(q)),
 		})
 	var res: Dictionary = d.get("resources", {})
 	for id in res:

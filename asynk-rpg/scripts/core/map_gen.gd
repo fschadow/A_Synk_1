@@ -134,6 +134,14 @@ static func generate(settings: Dictionary) -> Dictionary:
 
 	var objects := _place_objects(cells, types, rng, forest)
 	var start_cell := _start_cell(types)
+	# Tier-Doerfer auf freier Wiese
+	var village_count := clampi(n * n / 800, 2, 12)
+	objects.merge(Villages.place(cells,
+		func(c): return types[c] == Terrain.GRASS and _count_kind(types, c, Terrain.GRASS) >= 4,
+		func(c): return not objects.has(WorldObjects.make_id(c, WorldObjects.SLOT_LEFT)) \
+			and not objects.has(WorldObjects.make_id(c, WorldObjects.SLOT_RIGHT)) \
+			and not objects.has(WorldObjects.make_id(c, WorldObjects.SLOT_TERRAIN)),
+		start_cell, village_count, rng))
 	return {"types": types, "flow": flow, "objects": objects, "start": start_cell}
 
 

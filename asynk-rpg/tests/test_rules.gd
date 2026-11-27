@@ -20,6 +20,7 @@ func _init() -> void:
 	test_terrain_and_seasons()
 	test_water_rules()
 	test_map_gen()
+	test_villages()
 	print("%d Checks, %d Fehler" % [_checks, _failures])
 	quit(1 if _failures > 0 else 0)
 
@@ -385,3 +386,32 @@ func test_map_gen() -> void:
 	var c2 := MapGen.generate({"preset": "continents", "size": "small", "seed": 2})
 	check(c1["types"] != c2["types"], "Anderer Seed = andere Karte")
 	check(MapGen.generate({"preset": "continents", "size": "medium", "seed": 1})["types"].size() == 70 * 70, "Mittel = 70x70")
+
+
+func test_villages() -> void:
+	var m := small_map()
+	var o := WorldObjects.from_dict({"3,3,V": "village_fuchs"})
+	var s := GameState.new_game(["A", "B"], [Vector2i(3, 4), Vector2i(0, 0)], GameRules.STEPS_PER_TURN, "t")
+	check(Villages.current_quest(s, "village_fuchs", 0)["id"] == "fuchs_1", "Erster Auftrag des Fuchses")
+	var mv := GameRules.make_quest(s, o, "3,3,V")
+	check(GameRules.validate(s, m, mv, o) != "", "Ohne Aeste kein Abgeben")
+	s.players[0]["inv"][ResourceConfig.AESTE] = 3
+	check(GameRules.validate(s, m, mv, o) == "", "Mit 3 Aesten neben dem Dorf: abgeben geht")
+	GameRules.apply(s, mv)
+	var inv: Dictionary = s.players[0]["inv"]
+	check(inv[ResourceConfig.AESTE] == 0 and inv[ResourceConfig.OBST] == 2, "Aeste weg, 2 Obst Belohnung")
+	check(s.players[0]["steps_left"] == GameRules.STEPS_PER_TURN, "Abgeben kostet keine Schritte")
+	check(Villages.current_quest(s, "village_fuchs", 0)["id"] == "fuchs_2", "Danach der zweite Auftrag")
+	check(GameRules.validate(s, m, mv, o) != "", "Erledigten Auftrag nicht nochmal abgeben")
+	check(GameState.from_json(s.to_json()).players[0]["quests"] == ["fuchs_1"], "Erledigte Auftraege im Spielstand")
+	var far := GameState.new_game(["A", "B"], [Vector2i(0, 0), Vector2i(5, 5)], GameRules.STEPS_PER_TURN, "t")
+	far.players[0]["inv"][ResourceConfig.AESTE] = 3
+	check(GameRules.validate(far, m, GameRules.make_quest(far, o, "3,3,V"), o) != "", "Zu weit weg vom Dorf")
+	# Generierte Karten haben Doerfer
+	var gen := MapGen.generate({"preset": "pangaea", "size": "medium", "seed": 5})
+	var villages := 0
+	for id in gen["objects"]:
+		if Villages.is_village(gen["objects"][id]):
+			villages += 1
+			check(gen["types"][WorldObjects.id_cell(id)] == Terrain.GRASS, "Dorf steht auf Wiese")
+	check(villages >= 2, "Generierte Karte hat Doerfer (%d)" % villages)

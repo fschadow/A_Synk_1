@@ -12,6 +12,8 @@ var _fell_dialog: ConfirmationDialog
 var _pending_fell := Vector2i.ZERO
 var _start_zoom: Vector2
 var _cam_tween: Tween
+var _village_dialog: VillageDialog
+var village_view: VillageView
 
 
 func _ready() -> void:
@@ -27,6 +29,12 @@ func _ready() -> void:
 	_fell_dialog.cancel_button_text = "Abbrechen"
 	_fell_dialog.confirmed.connect(func(): Session.request_action(_pending_fell, ResourceConfig.ACT_FELL))
 	$CanvasLayer.add_child(_fell_dialog)
+	village_view = VillageView.new()
+	village_view.name = "VillageView"
+	add_child(village_view)
+	_village_dialog = VillageDialog.new()
+	_village_dialog.name = "VillageDialog"
+	$CanvasLayer.add_child(_village_dialog)
 
 
 func _notification(what: int) -> void:
@@ -35,7 +43,7 @@ func _notification(what: int) -> void:
 
 
 func _input(event: InputEvent) -> void:
-	if Hud.is_blocking() or _fell_dialog.visible:
+	if Hud.is_blocking() or _fell_dialog.visible or _village_dialog.visible:
 		return
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode in [KEY_SPACE, KEY_HOME]:
 		focus_on_player()
@@ -53,6 +61,11 @@ func _on_tap(screen_pos: Vector2) -> void:
 		return
 	var world_pos := get_canvas_transform().affine_inverse() * screen_pos
 	var cell: Vector2i = Session.terrain.local_to_map(Session.terrain.to_local(world_pos))
+	# Tippen auf ein Tier-Dorf oeffnet den Dialog (egal welche Faehigkeit).
+	for id in Session.objects.ids_at(cell):
+		if WorldObjects.id_slot(id) == WorldObjects.SLOT_VILLAGE:
+			_village_dialog.open(id)
+			return
 	var action: String = Glob.action_for(Glob.CurStatus)
 	if action == ResourceConfig.ACT_FELL:
 		# Erst pruefen, ob Faellen ueberhaupt ginge, dann nachfragen.

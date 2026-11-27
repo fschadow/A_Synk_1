@@ -42,6 +42,7 @@ func _enter_tree() -> void:
 func _ready() -> void:
 	map = HexMap.from_cells(terrain.get_used_cells() if terrain else [])
 	objects = WorldObjects.from_layers(terrain, objects_left, objects_right)
+	_add_standard_villages()
 	# Erst starten, wenn alle Figuren/HUDs ihr _ready hinter sich haben.
 	_start.call_deferred()
 
@@ -119,6 +120,21 @@ func _setup_map(settings: Dictionary) -> void:
 	map_ready.emit(gen)
 
 
+## Gemalte Standardkarte: ein paar Tier-Doerfer an festen (reproduzierbaren)
+## Stellen auf freien Feldern verteilen.
+func _add_standard_villages() -> void:
+	if map.cell_count() == 0 or start_cells.is_empty():
+		return
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 2024
+	var placed := Villages.place(map.cells(),
+		func(c): return map.is_land(c) and map.neighbors(c).size() == 6,
+		func(c): return objects.ids_at(c).is_empty(),
+		start_cells[0], 4, rng)
+	for id in placed:
+		objects.set_kind(id, placed[id])
+
+
 ## Kompletten Spielstand uebernehmen (LAN-Start, Wiederbeitritt, Neuabgleich).
 func load_state(s: GameState) -> void:
 	if state == null or state.settings != s.settings:
@@ -191,6 +207,17 @@ func request_action(cell: Vector2i, action: String) -> bool:
 		move_rejected.emit(plan["error"])
 		return false
 	return _request(plan["moves"])
+
+
+## Auftrag im Tier-Dorf abgeben.
+func request_quest(village_id: String) -> bool:
+	if not _may_act():
+		return false
+	var move := GameRules.make_quest(state, objects, village_id)
+	if move.has("error"):
+		move_rejected.emit(move["error"])
+		return false
+	return _request([move])
 
 
 func request_end_turn() -> bool:
